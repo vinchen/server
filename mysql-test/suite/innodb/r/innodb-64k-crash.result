@@ -259,6 +259,10 @@ UPDATE t2 SET qc=@i,rc=@i,sc=@i,tc=@i,uc=@i;
 UPDATE t2 SET vc=@i,wc=@i,xc=@i,yc=@i,zc=@i;
 COMMIT;
 BEGIN;
+<<<<<<< HEAD
+=======
+INSERT INTO t1 SELECT * from t2;
+>>>>>>> mariadb-10.1.22
 UPDATE t1 SET a=@c,b=@c,c=@c,d=@c,e=@c,f=@c,g=@c,h=@c,i=@c,j=@c,
 k=@c,l=@c,m=@c,n=@c,o=@c,p=@c,q=@c,r=@c,s=@c,t=@c,u=@c,
 v=@c,w=@c,x=@c,y=@c,z=@c,

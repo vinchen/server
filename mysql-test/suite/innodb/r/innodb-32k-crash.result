@@ -115,8 +115,12 @@ UPDATE t2 SET ka=@l,la=@l,ma=@l,na=@l,oa=@l,pa=@l;
 UPDATE t2 SET qa=@l,ra=@l,sa=@l,ta=@l,ua=@l;
 UPDATE t2 SET va=@l,wa=@l,xa=@l,ya=@l,za=@l;
 COMMIT;
-INSERT INTO t1 SELECT * from t2;
 BEGIN;
+INSERT INTO t1 SELECT * from t2;
+<<<<<<< HEAD
+BEGIN;
+=======
+>>>>>>> mariadb-10.1.22
 UPDATE t1 SET a=@e,b=@e,c=@e,d=@e,e=@e;
 # Kill and restart
 UPDATE t1 SET a=@f,b=@f,c=@f,d=@f,e=@f,f=@f,g=@f,h=@f,i=@f,j=@f,

@@ -9,7 +9,6 @@ SET @restore_slave_net_timeout=@@global.slave_net_timeout;
 connection master;
 RESET MASTER;
 SET @restore_slave_net_timeout=@@global.slave_net_timeout;
-SET @restore_event_scheduler=@@global.event_scheduler;
 
 connection slave;
 *** Default value ***
@@ -244,9 +243,13 @@ CHANGE MASTER TO MASTER_HOST='127.0.0.1', MASTER_PORT=MASTER_PORT, MASTER_USER='
 include/start_slave.inc
 connection master;
 SET @@global.event_scheduler=1;
+<<<<<<< HEAD
 connection slave;
 Number of received heartbeat events: 0
 connection master;
+=======
+Received heartbeats meet expectations: TRUE
+>>>>>>> mariadb-10.1.22
 DELETE FROM t1;
 DROP EVENT e1;
 connection slave;

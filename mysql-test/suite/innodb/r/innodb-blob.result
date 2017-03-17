@@ -41,6 +41,7 @@ a
 1
 2
 3
+<<<<<<< HEAD
 SET DEBUG='+d,crash_commit_before';
 Warnings:
 Warning	1287	'@@debug' is deprecated and will be removed in a future release. Please use '@@debug_dbug' instead
@@ -49,6 +50,11 @@ ERROR HY000: Lost connection to MySQL server during query
 disconnect con1;
 disconnect con2;
 connection default;
+=======
+BEGIN;
+INSERT INTO t2 VALUES (42);
+# Kill and restart
+>>>>>>> mariadb-10.1.22
 ERROR HY000: Lost connection to MySQL server during query
 CHECK TABLE t1;
 Table	Op	Msg_type	Msg_text
@@ -100,6 +106,7 @@ SELECT info FROM information_schema.processlist
 WHERE state = 'debug sync point: before_row_upd_extern';
 info
 UPDATE t3 SET c=REPEAT('i',3000) WHERE a=2
+<<<<<<< HEAD
 SET DEBUG='+d,crash_commit_before';
 Warnings:
 Warning	1287	'@@debug' is deprecated and will be removed in a future release. Please use '@@debug_dbug' instead
@@ -107,6 +114,9 @@ COMMIT;
 ERROR HY000: Lost connection to MySQL server during query
 disconnect con2;
 connection default;
+=======
+# Kill and restart
+>>>>>>> mariadb-10.1.22
 ERROR HY000: Lost connection to MySQL server during query
 CHECK TABLE t1,t2,t3;
 Table	Op	Msg_type	Msg_text
@@ -136,6 +146,7 @@ SELECT info FROM information_schema.processlist
 WHERE state = 'debug sync point: after_row_upd_extern';
 info
 UPDATE t3 SET c=REPEAT('j',3000) WHERE a=2
+<<<<<<< HEAD
 SET DEBUG='+d,crash_commit_before';
 Warnings:
 Warning	1287	'@@debug' is deprecated and will be removed in a future release. Please use '@@debug_dbug' instead
@@ -143,6 +154,9 @@ COMMIT;
 ERROR HY000: Lost connection to MySQL server during query
 disconnect con2;
 connection default;
+=======
+# Kill and restart
+>>>>>>> mariadb-10.1.22
 ERROR HY000: Lost connection to MySQL server during query
 CHECK TABLE t1,t2,t3;
 Table	Op	Msg_type	Msg_text

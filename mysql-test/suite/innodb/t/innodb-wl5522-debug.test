@@ -25,6 +25,8 @@ call mtr.add_suppression("InnoDB: Cannot calculate statistics for table .*");
 call mtr.add_suppression("InnoDB: Page 0 at offset 0 looks corrupted in file");
 call mtr.add_suppression("InnoDB: Page for tablespace ");
 call mtr.add_suppression("InnoDB: Invalid FSP_SPACE_FLAGS=");
+call mtr.add_suppression("InnoDB: Corruption: Block in space_id .* in file .* corrupted");
+call mtr.add_suppression("InnoDB: Based on page type .*");
 FLUSH TABLES;
 
 let MYSQLD_DATADIR =`SELECT @@datadir`;
@@ -33,7 +35,6 @@ let $pathfix=/: '.*test_wl5522.*t1.ibd'/: 'test_wl5522\\t1.ibd'/;
 let $strerrfix=/ (\(.+\))//;
 
 SET GLOBAL innodb_file_per_table = 1;
-SELECT @@innodb_file_per_table;
 
 DROP DATABASE IF EXISTS test_wl5522;
 CREATE DATABASE test_wl5522;
@@ -68,7 +69,6 @@ ALTER TABLE test_wl5522.t1 DISCARD TABLESPACE;
 DROP TABLE test_wl5522.t1;
 
 SET GLOBAL innodb_file_per_table = 1;
-SELECT @@innodb_file_per_table;
 
 # Create the table that we will use for crash recovery (during IMPORT)
 CREATE TABLE test_wl5522.t1 (c1 INT) ENGINE = Innodb;

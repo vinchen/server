@@ -24,6 +24,48 @@ connection default;
 # Kill the server
 SELECT * FROM t1;
 ERROR 42000: Unknown storage engine 'InnoDB'
+<<<<<<< HEAD
+SELECT * FROM t1;
+ERROR 42000: Unknown storage engine 'InnoDB'
+=======
+FOUND /syntax error in innodb_log_group_home_dir/ in mysqld.1.err
+SELECT * FROM t1;
+ERROR 42000: Unknown storage engine 'InnoDB'
+FOUND /InnoDB: Starting crash recovery from checkpoint LSN=/ in mysqld.1.err
+>>>>>>> mariadb-10.1.22
+SELECT * FROM t1;
+ERROR 42000: Unknown storage engine 'InnoDB'
+SELECT * FROM t1;
+ERROR 42000: Unknown storage engine 'InnoDB'
+<<<<<<< HEAD
+SELECT * FROM t1;
+ERROR 42000: Unknown storage engine 'InnoDB'
+SELECT * FROM t1;
+ERROR 42000: Unknown storage engine 'InnoDB'
+SELECT * FROM t1;
+ERROR 42000: Unknown storage engine 'InnoDB'
+SELECT * FROM t1;
+ERROR 42000: Unknown storage engine 'InnoDB'
+=======
+FOUND /InnoDB: innodb_read_only prevents crash recovery/ in mysqld.1.err
+SELECT * FROM t1;
+ERROR 42000: Unknown storage engine 'InnoDB'
+FOUND /redo log from 3\*[0-9]+ to 2\*[0-9]+ pages/ in mysqld.1.err
+SELECT * FROM t1;
+ERROR 42000: Unknown storage engine 'InnoDB'
+FOUND /redo log from 3\*[0-9]+ to 2\*[0-9]+ pages/ in mysqld.1.err
+SELECT * FROM t1;
+ERROR 42000: Unknown storage engine 'InnoDB'
+FOUND /InnoDB: innodb_read_only prevents crash recovery/ in mysqld.1.err
+SELECT * FROM t1;
+ERROR 42000: Unknown storage engine 'InnoDB'
+FOUND /redo log from 3\*[0-9]+ to 2\*[0-9]+ pages/ in mysqld.1.err
+>>>>>>> mariadb-10.1.22
+SELECT * FROM t1;
+ERROR 42000: Unknown storage engine 'InnoDB'
+SELECT * FROM t1;
+ERROR 42000: Unknown storage engine 'InnoDB'
+<<<<<<< HEAD
 SELECT * FROM t1;
 ERROR 42000: Unknown storage engine 'InnoDB'
 SELECT * FROM t1;
@@ -34,24 +76,28 @@ SELECT * FROM t1;
 ERROR 42000: Unknown storage engine 'InnoDB'
 SELECT * FROM t1;
 ERROR 42000: Unknown storage engine 'InnoDB'
+=======
+FOUND /InnoDB: Cannot create log files in read-only mode/ in mysqld.1.err
 SELECT * FROM t1;
 ERROR 42000: Unknown storage engine 'InnoDB'
+FOUND /InnoDB: Setting log file .*ib_logfile[0-9]+ size to/ in mysqld.1.err
 SELECT * FROM t1;
 ERROR 42000: Unknown storage engine 'InnoDB'
+FOUND /InnoDB: Setting log file .*ib_logfile[0-9]+ size to/ in mysqld.1.err
 SELECT * FROM t1;
 ERROR 42000: Unknown storage engine 'InnoDB'
+FOUND /InnoDB: Only one log file found/ in mysqld.1.err
 SELECT * FROM t1;
 ERROR 42000: Unknown storage engine 'InnoDB'
+FOUND /InnoDB: Log file .*ib_logfile0 size 7 is not a multiple of innodb_page_size/ in mysqld.1.err
 SELECT * FROM t1;
 ERROR 42000: Unknown storage engine 'InnoDB'
+FOUND /InnoDB: Log file .*ib_logfile1 is of different size 1048576 bytes than other log files/ in mysqld.1.err
 SELECT * FROM t1;
 ERROR 42000: Unknown storage engine 'InnoDB'
-SELECT * FROM t1;
-ERROR 42000: Unknown storage engine 'InnoDB'
-SELECT * FROM t1;
-ERROR 42000: Unknown storage engine 'InnoDB'
-SELECT * FROM t1;
-ERROR 42000: Unknown storage engine 'InnoDB'
+FOUND /InnoDB: Setting log file .*ib_logfile[0-9]+ size to/ in mysqld.1.err
+FOUND /InnoDB: Renaming log file .*ib_logfile101 to .*ib_logfile0/ in mysqld.1.err
+>>>>>>> mariadb-10.1.22
 SELECT * FROM t1;
 a
 42
