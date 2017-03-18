@@ -84,9 +84,7 @@ bool
 fil_space_verify_crypt_checksum(
 /*============================*/
 	const byte* 		src_frame,	/*!< in: page the verify */
-	const page_size_t&	page_size	/*!< in: page size */
-	,uintmax_t 		page_no,
-	bool			strict_check);
+	const page_size_t&	page_size);	/*!< in: page size */
 
 /* Global variables */
 static bool			verbose;
@@ -121,7 +119,7 @@ char*				log_filename = NULL;
 /* User defined filename for logging. */
 FILE*				log_file = NULL;
 /* Enabled for log write option. */
-static bool			is_log_enabled = false;
+static bool			 is_log_enabled = false;
 static my_bool do_leaf;
 static ulong n_merge;
 #ifndef _WIN32
@@ -589,17 +587,14 @@ is_page_corrupted(
 	normal method.
 	*/
 	if (mach_read_from_4(buf+FIL_PAGE_FILE_FLUSH_LSN_OR_KEY_VERSION) != 0) {
-		is_corrupted = fil_space_verify_crypt_checksum(buf, page_size,
-			cur_page_num, strict_verify);
+		is_corrupted = fil_space_verify_crypt_checksum(buf, page_size);
 	} else {
 		is_corrupted = true;
 	}
 
 	if (is_corrupted) {
 		is_corrupted = buf_page_is_corrupted(
-			true, buf, page_size, false,
-			cur_page_num, strict_verify,
-			is_log_enabled, log_file);
+			true, buf, page_size, false);
 	}
 
 	return(is_corrupted);

@@ -796,14 +796,8 @@ buf_page_is_corrupted(
 	bool			check_lsn,
 	const byte*		read_buf,
 	const page_size_t&	page_size,
-	bool			skip_checksum
-#ifdef UNIV_INNOCHECKSUM
-	,uintmax_t		page_no,
-	bool			strict_check,
-	bool			is_log_enabled,
-	FILE*			log_file
-#endif /* UNIV_INNOCHECKSUM */
-) MY_ATTRIBUTE((warn_unused_result));
+	bool			skip_checksum)
+	MY_ATTRIBUTE((warn_unused_result));
 #ifndef UNIV_INNOCHECKSUM
 /**********************************************************************//**
 Gets the space id, page offset, and byte offset within page of a

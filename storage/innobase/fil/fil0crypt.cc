@@ -2618,12 +2618,7 @@ bool
 fil_space_verify_crypt_checksum(
 /*============================*/
 	const byte* 		src_frame,	/*!< in: page the verify */
-	const page_size_t&	page_size	/*!< in: page size */
-#ifdef UNIV_INNOCHECKSUM
-	,uintmax_t 		page_no,
-	bool			strict_check
-#endif /* UNIV_INNOCHECKSUM */
-)
+	const page_size_t&	page_size)	/*!< in: page size */
 {
 	// key version
 	uint key_version = mach_read_from_4(
@@ -2673,11 +2668,7 @@ fil_space_verify_crypt_checksum(
 
 	/* verify checksums */
 	bool corrupted = buf_page_is_corrupted(false, src_frame,
-		page_size, false
-#ifdef UNIV_INNOCHECKSUM
-		,page_no, strict_check, false, NULL
-#endif /* UNIV_INNOCHECKSUM */
-	);
+		page_size, false);
 
 	/** restore frame & algorithm */
 	srv_checksum_algorithm = save_checksum_algorithm;
