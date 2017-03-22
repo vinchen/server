@@ -9236,9 +9236,10 @@ get_store_key(THD *thd, KEYUSE *keyuse, table_map used_tables,
   else if (keyuse->val->type() == Item::FIELD_ITEM ||
            (keyuse->val->type() == Item::REF_ITEM &&
 	    ((((Item_ref*)keyuse->val)->ref_type() == Item_ref::OUTER_REF &&
-              (*(Item_ref**)((Item_ref*)keyuse->val)->ref)->ref_type() ==
-              Item_ref::DIRECT_REF) || 
-             ((Item_ref*)keyuse->val)->ref_type() == Item_ref::VIEW_REF) &&
+              (((*(Item_ref**)((Item_ref*)keyuse->val)->ref)->type() == Item::REF_ITEM) &&
+              ((*(Item_ref**)((Item_ref*)keyuse->val)->ref)->ref_type() ==
+              Item_ref::DIRECT_REF)) || 
+             ((Item_ref*)keyuse->val)->ref_type() == Item_ref::VIEW_REF)) &&
             keyuse->val->real_item()->type() == Item::FIELD_ITEM))
     return new store_key_field(thd,
 			       key_part->field,
