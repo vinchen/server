@@ -37,7 +37,7 @@ sub start_test {
 }
 
 { 
-  my $bin=$ENV{MTR_BINDIR} or '..';
+  my $bin=$ENV{MTR_BINDIR} || '..';
   return "Not run for embedded server" if $::opt_embedded_server;
   return "Not configured to run ctest" unless -f "$bin/CTestTestfile.cmake";
   my ($ctest_vs)= $opt_vs_config ? "--build-config $opt_vs_config" : "";
