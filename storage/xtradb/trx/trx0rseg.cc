@@ -272,7 +272,11 @@ trx_rseg_create_instance(
 
 		page_no = trx_sysf_rseg_get_page_no(sys_header, i, mtr);
 
-		if (page_no != FIL_NULL) {
+		/* Slot-1....Slot-n are reserved for non-redo rsegs.
+		Non-redo rsegs are recreated on server re-start so
+		avoid initializing the existing non-redo rsegs. */
+		if (trx_sys_is_noredo_rseg_slot(i)) {
+		} else if (page_no != FIL_NULL) {
 			ulint		space;
 			ulint		zip_size;
 			trx_rseg_t*	rseg = NULL;
