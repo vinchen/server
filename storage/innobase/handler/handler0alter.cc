@@ -5598,6 +5598,38 @@ ha_innobase::prepare_inplace_alter_table(
 		}
 	}
 
+	indexed_table = m_prebuilt->table;
+
+	if (indexed_table->file_unreadable &&
+	    fil_space_get(indexed_table->space) != NULL) {
+		String str;
+		const char* engine= table_type();
+		push_warning_printf(m_user_thd, Sql_condition::WARN_LEVEL_WARN,
+			HA_ERR_DECRYPTION_FAILED,
+			"Table %s is encrypted but encryption service or"
+			" used key_id is not available. "
+			" Can't continue reading table.",
+			indexed_table->name);
+		get_error_message(HA_ERR_DECRYPTION_FAILED, &str);
+		my_error(ER_GET_ERRMSG, MYF(0), HA_ERR_DECRYPTION_FAILED, str.c_ptr(), engine);
+
+		DBUG_RETURN(true);
+	}
+
+	if (indexed_table->corrupted
+	    || dict_table_get_first_index(indexed_table) == NULL
+	    || dict_index_is_corrupted(
+		    dict_table_get_first_index(indexed_table))) {
+		/* The clustered index is corrupted. */
+		my_error(ER_CHECK_NO_SUCH_TABLE, MYF(0));
+		DBUG_RETURN(true);
+	}
+
+	if (!(ha_alter_info->handler_flags & ~INNOBASE_INPLACE_IGNORE)) {
+		/* Nothing to do */
+		goto err_exit_no_heap;
+	}
+
 	if (ha_alter_info->handler_flags
 	    & Alter_inplace_info::CHANGE_CREATE_OPTION) {
 		const char* invalid_opt = info.create_options_are_invalid();

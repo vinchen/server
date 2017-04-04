@@ -1507,6 +1507,7 @@ buf_block_init(
 	block->page.encrypted = false;
 	block->page.real_size = 0;
 	block->page.write_size = 0;
+	block->page.key_version = 0;
 	block->modify_clock = 0;
 	block->page.slot = NULL;
 
@@ -4365,16 +4366,19 @@ loop:
 			++retries;
 
 			ib::info() << "Retry: " << retries << "/" << BUF_PAGE_READ_MAX_RETRIES;
+
 			DBUG_EXECUTE_IF(
 				"innodb_page_corruption_retries",
-				/* This is needed as we might just mark
-				space corrupted. */
-				goto fatal_exit;
+				/* This is needed to avoid tablespace
+				being marked as corrupted. */
+				goto force_fail;
 			);
 		} else {
+
 			if (err) {
 				*err = local_err;
 			}
+
 			/* Encrypted pages that are not corrupted are marked
 			as encrypted and that fact is later pushed to
 			user thread. */
@@ -4389,10 +4393,10 @@ loop:
 				return (NULL);
 			}
 
-fatal_exit:
+force_fail:
 			ib::fatal() << "Unable to read page " << page_id
-					    << " into the buffer pool after "
-					    << BUF_PAGE_READ_MAX_RETRIES << " attempts."
+					<< " into the buffer pool after "
+					<< BUF_PAGE_READ_MAX_RETRIES << " attempts."
 					" The most probable cause of this error may"
 					" be that the table has been corrupted. Or,"
 					" the table was compressed with with an"
@@ -5171,6 +5175,7 @@ buf_page_init_low(
 	bpage->encrypted = false;
 	bpage->real_size = 0;
 	bpage->slot = NULL;
+	bpage->key_version = 0;
 
 	HASH_INVALIDATE(bpage, hash);
 
@@ -5944,13 +5949,13 @@ buf_page_io_complete(
 
 		if (bpage->size.is_compressed()) {
 			frame = bpage->zip.data;
-			buf_pool->n_pend_unzip++;
+			(void) my_atomic_addlint(&buf_pool->n_pend_unzip, 1);
 
 			if (uncompressed
 			    && !buf_zip_decompress((buf_block_t*) bpage,
 						   FALSE)) {
 
-				buf_pool->n_pend_unzip--;
+				(void) my_atomic_addlint(&buf_pool->n_pend_unzip, -1);
 
 				ib::info() << "Page "
 					   << bpage->id
@@ -5960,7 +5965,8 @@ buf_page_io_complete(
 
 				goto database_corrupted;
 			}
-			buf_pool->n_pend_unzip--;
+
+			(void) my_atomic_addlint(&buf_pool->n_pend_unzip, -1);
 		} else {
 			ut_a(uncompressed);
 			frame = ((buf_block_t*) bpage)->frame;
@@ -6022,6 +6028,7 @@ database_corrupted:
 				fil_system_enter();
 				fil_space_t* space = fil_space_get_by_id(bpage->id.space());
 				fil_system_exit();
+
 
 				ib::error()
 					<< "Database page corruption on disk"
@@ -7491,7 +7498,6 @@ buf_page_decrypt_after_read(buf_page_t* bpage)
 	bool page_compressed_encrypted = fil_page_is_compressed_encrypted(dst_frame);
 	buf_pool_t* buf_pool = buf_pool_from_bpage(bpage);
 	bool success = true;
-
 	if (bpage->id.page_no() == 0) {
 		/* File header pages are not encrypted/compressed */
 		return (true);

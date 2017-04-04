@@ -429,6 +429,7 @@ buf_read_page(
 
 	srv_stats.buf_pool_reads.add(count);
 
+
 	/* Increment number of I/O operations used for LRU policy. */
 	buf_LRU_stat_inc_io();
 
@@ -467,7 +468,7 @@ buf_read_page_background(
 
 	case DB_DECRYPTION_FAILED:
 		ib::error()
-			<< "Background Page read failed to decrypt page "
+			<< "Background page read failed to decrypt page "
 			<< page_id;
 		break;
 	default:
@@ -741,7 +742,7 @@ buf_read_ahead_linear(
 			case DB_SUCCESS:
 				break;
 			case DB_TABLESPACE_DELETED:
-				ib::warn() << "linear readahead trying to"
+				ib::warn() << "Linear readahead trying to"
 					" access page "
 					<< page_id_t(page_id.space(), i)
 					<< " in nonexisting or being-dropped"

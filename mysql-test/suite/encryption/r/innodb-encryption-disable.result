@@ -1,5 +1,5 @@
-call mtr.add_suppression("InnoDB: The page .* in file test/t[15] cannot be decrypted");
-call mtr.add_suppression("Couldn't load plugins from 'file_key_management");
+call mtr.add_suppression("InnoDB: The page .*");
+call mtr.add_suppression("Couldn't load plugins from 'file_key_management.*");
 create table t5 (
 `intcol1` int(32) DEFAULT NULL,
 `intcol2` int(32) DEFAULT NULL,

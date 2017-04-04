@@ -843,7 +843,6 @@ bool
 buf_page_is_zeroes(
 	const byte*		read_buf,
 	const page_size_t&	page_size);
-
 /** Checks if a page is corrupt.
 @param[in]	check_lsn	true if we need to check and complain about
 the LSN
@@ -1631,6 +1630,14 @@ public:
 					operation needed. */
 
 	bool            encrypted;	/*!< page is still encrypted */
+
+	/*!< For encrypted tables key_version is stored here before
+	page is decrypted because decryption will clear the
+	FIL_PAGE_FILE_FLUSH_LSN_OR_KEY_VERSION field and used
+	key_version is lost. Key rotation is naturally based on
+	fact what was the original key_version on the page. */
+
+	uint		key_version;
 
 	ulint           real_size;	/*!< Real size of the page
 					Normal pages == UNIV_PAGE_SIZE

@@ -2134,6 +2134,8 @@ recv_apply_hashed_log_recs(bool last_batch)
 	mutex_exit(&recv_sys->mutex);
 
 	return (DB_SUCCESS);
+
+	return (DB_SUCCESS);
 }
 
 /** Tries to parse a single log record.

@@ -1115,7 +1115,13 @@ buf_flush_write_block_low(
 
 		/* true means we want to evict this page from the
 		LRU list as well. */
-		buf_page_io_complete(bpage, true);
+		dberr_t err = buf_page_io_complete(bpage, true);
+
+		if (err != DB_SUCCESS) {
+			ib::error()
+				<< "Page encrypted while evicting a page "
+				<< bpage->id;
+		}
 	}
 
 	/* Increment the counter of I/O operations used

@@ -879,7 +879,7 @@ fil_flush_low(fil_space_t* space)
 {
 	ut_ad(mutex_own(&fil_system->mutex));
 	ut_ad(space);
-	ut_ad(!space->stop_new_ops);
+	ut_ad(!space->is_stopping());
 
 	if (fil_buffering_disabled(space)) {
 
@@ -5436,6 +5436,7 @@ fil_aio_wait(
 	mutex_enter(&fil_system->mutex);
 
 	fil_node_complete_io(node, type);
+	ulint purpose = node->space->purpose;
 
 	mutex_exit(&fil_system->mutex);
 
@@ -5447,7 +5448,7 @@ fil_aio_wait(
 	deadlocks in the i/o system. We keep tablespace 0 data files always
 	open, and use a special i/o thread to serve insert buffer requests. */
 
-	switch (node->space->purpose) {
+	switch (purpose) {
 	case FIL_TYPE_TABLESPACE:
 	case FIL_TYPE_TEMPORARY:
 	case FIL_TYPE_IMPORT:
@@ -5472,7 +5473,7 @@ fil_aio_wait(
 					<< (type == IORequestRead ? "Read" : "Write")
 					<< "operation failed for " << node->name
 					<< " page " << page_id
-					<< " error= " << ut_strerr(err);
+					<< " error = " << ut_strerr(err);
 			}
 
 		}
@@ -6919,26 +6920,6 @@ fil_space_get_block_size(
 	mutex_exit(&fil_system->mutex);
 
 	return block_size;
-}
-
-/*******************************************************************//**
-Returns the table space by a given id, NULL if not found. */
-fil_space_t*
-fil_space_found_by_id(
-/*==================*/
-	ulint	id)	/*!< in: space id */
-{
-	fil_space_t* space = NULL;
-	mutex_enter(&fil_system->mutex);
-	space = fil_space_get_by_id(id);
-
-	/* Not found if space is being deleted */
-	if (space && space->stop_new_ops) {
-		space = NULL;
-	}
-
-	mutex_exit(&fil_system->mutex);
-	return space;
 }
 
 /**

@@ -1109,6 +1109,8 @@ retry_page_get:
 				 buf_mode, file, line, mtr, &err);
 	tree_blocks[n_blocks] = block;
 
+	/* Note that here we allow block == NULL and err == DB_SUCCESS
+	see below */
 	if (err != DB_SUCCESS) {
 		if (err == DB_DECRYPTION_FAILED) {
 			ib_push_warning((void *)NULL,
@@ -2158,6 +2160,9 @@ btr_cur_open_at_index_side_func(
 					 BUF_GET, file, line, mtr, &err);
 		tree_blocks[n_blocks] = block;
 
+
+		ut_ad((block != NULL) == (err == DB_SUCCESS));
+
 		if (err != DB_SUCCESS) {
 			if (err == DB_DECRYPTION_FAILED) {
 				ib_push_warning((void *)NULL,
@@ -2515,6 +2520,8 @@ btr_cur_open_at_rnd_pos_func(
 		block = buf_page_get_gen(page_id, page_size, rw_latch, NULL,
 			BUF_GET, file, line, mtr, &err);
 		tree_blocks[n_blocks] = block;
+
+		ut_ad((block != NULL) == (err == DB_SUCCESS));
 
 		if (err != DB_SUCCESS) {
 			if (err == DB_DECRYPTION_FAILED) {
@@ -5321,6 +5328,8 @@ btr_estimate_n_rows_in_range_on_level(
 					 NULL, BUF_GET_POSSIBLY_FREED,
 					 __FILE__, __LINE__, &mtr, &err);
 
+		ut_ad((block != NULL) == (err == DB_SUCCESS));
+
 		if (err != DB_SUCCESS) {
 			if (err == DB_DECRYPTION_FAILED) {
 				ib_push_warning((void *)NULL,
@@ -5479,11 +5488,6 @@ btr_estimate_n_rows_in_range_low(
 					    &cursor, 0,
 					    __FILE__, __LINE__, &mtr);
 
-		if (index->table->file_unreadable) {
-			mtr_commit(&mtr);
-			return (0);
-		}
-
 		ut_ad(!page_rec_is_infimum(btr_cur_get_rec(&cursor)));
 
 		/* We should count the border if there are any records to
@@ -5509,12 +5513,6 @@ btr_estimate_n_rows_in_range_low(
 				   << " table: " << index->table->name
 				   << " index: " << index->name;
 		}
-
-		if (index->table->file_unreadable) {
-			mtr_commit(&mtr);
-			return (0);
-		}
-
 		ut_ad(page_rec_is_infimum(btr_cur_get_rec(&cursor)));
 
 		/* The range specified is wihout a left border, just
@@ -5525,6 +5523,10 @@ btr_estimate_n_rows_in_range_low(
 	}
 
 	mtr_commit(&mtr);
+
+	if (index->table->file_unreadable) {
+		return (0);
+	}
 
 	mtr_start(&mtr);
 

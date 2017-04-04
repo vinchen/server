@@ -6606,7 +6606,7 @@ ha_innobase::open(
 
 		/* Mark this table as corrupted, so the drop table
 		or force recovery can still use it, but not others. */
-		ib_table->corrupted = true;
+		ib_table->file_unreadable = true;
 		dict_table_close(ib_table, FALSE, FALSE);
 		ib_table = NULL;
 		is_part = NULL;
@@ -6643,7 +6643,8 @@ ha_innobase::open(
 	MONITOR_INC(MONITOR_TABLE_OPEN);
 
 	bool	no_tablespace = false;
-	bool	ibd_missing = false;
+	bool	encrypted = false;
+	fil_space_t* space = NULL;
 
 	if (dict_table_is_discarded(ib_table)) {
 
@@ -6658,21 +6659,28 @@ ha_innobase::open(
 
 		no_tablespace = false;
 
-	} else if (ib_table->file_unreadable && fil_space_get(ib_table->space) == NULL) {
-
-		ib_senderrf(
-			thd, IB_LOG_LEVEL_WARN,
-			ER_TABLESPACE_MISSING, norm_name);
-
-		/* This means we have no idea what happened to the tablespace
-		file, best to play it safe. */
-
-		no_tablespace = true;
-		ibd_missing = true;
 	} else if (ib_table->file_unreadable) {
-		/* This means that tablespace was found but we could not
-		decrypt encrypted page. */
-		no_tablespace = true;
+
+		if ((space = fil_space_acquire_silent(ib_table->space))) {
+			if (space->crypt_data && space->crypt_data->is_encrypted()) {
+				/* This means that tablespace was found but we could not
+				decrypt encrypted page. */
+				no_tablespace = true;
+				encrypted = true;
+			} else {
+				no_tablespace = true;
+			}
+		} else {
+			ib_senderrf(
+				thd, IB_LOG_LEVEL_WARN,
+				ER_TABLESPACE_MISSING, norm_name);
+
+			/* This means we have no idea what happened to the tablespace
+			file, best to play it safe. */
+
+			no_tablespace = true;
+		}
+	} else if (ib_table->file_unreadable) {
 	} else {
 		no_tablespace = false;
 	}
@@ -6685,36 +6693,36 @@ ha_innobase::open(
 		/* If table has no talespace but it has crypt data, check
 		is tablespace made unaccessible because encryption service
 		or used key_id is not available. */
-		if (ib_table && !ibd_missing) {
+		if (encrypted) {
 			bool warning_pushed = false;
-			fil_space_crypt_t* crypt_data = ib_table->crypt_data;
 
-			if (crypt_data && crypt_data->should_encrypt()) {
-
-				if (!encryption_key_id_exists(crypt_data->key_id)) {
-					push_warning_printf(thd, Sql_condition::WARN_LEVEL_WARN,
-						HA_ERR_DECRYPTION_FAILED,
-						"Table %s is encrypted but encryption service or"
-						" used key_id %u is not available. "
-						" Can't continue reading table.",
-						ib_table->name, crypt_data->key_id);
-					ret_err = HA_ERR_DECRYPTION_FAILED;
-					warning_pushed = true;
-				}
+			if (!encryption_key_id_exists(space->crypt_data->key_id)) {
+				push_warning_printf(thd, Sql_condition::WARN_LEVEL_WARN,
+					HA_ERR_DECRYPTION_FAILED,
+					"Table %s is encrypted but encryption service or"
+					" used key_id %u is not available. "
+					" Can't continue reading table.",
+					space->name, space->crypt_data->key_id);
+				ret_err = HA_ERR_DECRYPTION_FAILED;
+				warning_pushed = true;
 			}
 
 			/* If table is marked as encrypted then we push
 			warning if it has not been already done as used
 			key_id might be found but it is incorrect. */
-			if (ib_table->file_unreadable && !warning_pushed) {
+			if (!warning_pushed) {
 				push_warning_printf(thd, Sql_condition::WARN_LEVEL_WARN,
 					HA_ERR_DECRYPTION_FAILED,
 					"Table %s is encrypted but encryption service or"
 					" used key_id is not available. "
 					" Can't continue reading table.",
-					ib_table->name);
+					space->name);
 				ret_err = HA_ERR_DECRYPTION_FAILED;
 			}
+		}
+
+		if (space) {
+			fil_space_release(space);
 		}
 
 		dict_table_close(ib_table, FALSE, FALSE);
@@ -10328,6 +10336,12 @@ ha_innobase::general_fetch(
 	if (m_prebuilt->table->file_unreadable) {
 		DBUG_RETURN(HA_ERR_DECRYPTION_FAILED);
 	}
+
+	if (m_prebuilt->table->file_unreadable
+	    && fil_space_get(m_prebuilt->table->space) != NULL) {
+		DBUG_RETURN(HA_ERR_DECRYPTION_FAILED);
+	}
+
 
 	innobase_srv_conc_enter_innodb(m_prebuilt);
 

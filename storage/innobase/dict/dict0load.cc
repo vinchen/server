@@ -2867,6 +2867,7 @@ err_exit:
 
 	dict_load_tablespace(table, heap, ignore_err);
 
+
 	dict_load_columns(table, heap);
 
 	dict_load_virtual(table, heap);
@@ -2987,7 +2988,7 @@ err_exit:
 			/* It is possible we force to load a corrupted
 			clustered index if srv_load_corrupted is set.
 			Mark the table as corrupted in this case */
-			table->corrupted = TRUE;
+			table->corrupted = true;
 		}
 	}
 

@@ -539,6 +539,7 @@ buf_dblwr_process(void)
 		ulint	space_id	= page_get_space_id(page);
 
 		fil_space_t*	space = fil_space_get(space_id);
+		IORequest	write_request(IORequest::WRITE);
 
 		if (space == NULL) {
 			/* Maybe we have dropped the tablespace
@@ -613,7 +614,7 @@ buf_dblwr_process(void)
 				   true, read_buf, page_size, space)) {
 				/* The page is good; there is no need
 				to consult the doublewrite buffer. */
-				continue;
+				goto release;
 			}
 
 			/* We intentionally skip this message for
@@ -644,7 +645,7 @@ buf_dblwr_process(void)
 			buffer. If not, we will report a fatal error
 			for a corrupted page somewhere else if that
 			page was truly needed. */
-			continue;
+			goto release;
 		}
 
 		if (page_no == 0) {
@@ -657,7 +658,7 @@ buf_dblwr_process(void)
 					" of page " << page_id
 					<< " due to invalid flags "
 					<< ib::hex(flags);
-				continue;
+				goto release;
 			}
 			/* The flags on the page should be converted later. */
 		}
@@ -665,14 +666,14 @@ buf_dblwr_process(void)
 		/* Write the good page from the doublewrite buffer to
 		the intended position. */
 
-		IORequest	write_request(IORequest::WRITE);
-
 		fil_io(write_request, true, page_id, page_size,
 		       0, page_size.physical(),
 				const_cast<byte*>(page), NULL);
 
 		ib::info() << "Recovered page " << page_id
 			<< " from the doublewrite buffer.";
+release:
+		fil_space_release(space);
 	}
 
 	recv_dblwr.pages.clear();

@@ -4696,7 +4696,7 @@ rec_loop:
 
 	rec = btr_pcur_get_rec(pcur);
 
-	if (!rec || index->table->file_unreadable) {
+	if (index->table->file_unreadable) {
 		err = DB_DECRYPTION_FAILED;
 		goto lock_wait_or_error;
 	}

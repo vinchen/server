@@ -439,15 +439,15 @@ fil_space_set_crypt_data(
 
 /******************************************************************
 Parse a MLOG_FILE_WRITE_CRYPT_DATA log entry
-@param[in]	ptr		Log entry start
+@param[in,out]	ptr		Log entry start
 @param[in]	end_ptr		Log entry end
 @param[in]	block		buffer block
 @param[out]	err		DB_SUCCESS or DB_DECRYPTION_FAILED
 @return position on log buffer */
 UNIV_INTERN
-const byte*
+byte*
 fil_parse_write_crypt_data(
-	const byte*		ptr,
+	byte*			ptr,
 	const byte*		end_ptr,
 	const buf_block_t*	block,
 	dberr_t*		err)
@@ -887,6 +887,7 @@ fil_crypt_calculate_checksum(
 
 	return checksum;
 }
+
 
 /***********************************************************************/
 
@@ -1793,10 +1794,13 @@ fil_crypt_rotate_page(
 		int needs_scrubbing = BTR_SCRUB_SKIP_PAGE;
 		lsn_t block_lsn = block->page.newest_modification;
 		byte* frame = buf_block_get_frame(block);
-		uint kv =  mach_read_from_4(frame + FIL_PAGE_FILE_FLUSH_LSN_OR_KEY_VERSION);
+		/* Here can't read key version from page as
+		FIL_PAGE_FILE_FLUSH_LSN_OR_KEY_VERSION field is initialized
+		after decryption on fil_space_decrypt() */
+		uint kv =  block->page.key_version;
 
 		/* check if tablespace is closing after reading page */
-		if (space->is_stopping()) {
+		if (!space->is_stopping()) {
 
 			if (kv == 0 &&
 				fil_crypt_is_page_uninitialized(frame, page_size)) {

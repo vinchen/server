@@ -4,10 +4,9 @@
 # embedded does not support restart
 -- source include/not_embedded.inc
 
-call mtr.add_suppression("InnoDB: Block in space_id .* in file .* encrypted.");
-call mtr.add_suppression("InnoDB: However key management plugin or used key_version .* is not found or used encryption algorithm or method does not match.");
-call mtr.add_suppression("InnoDB: Marking tablespace as missing. You may drop this table or install correct key management plugin and key file.");
-call mtr.add_suppression("InnoDB: The page .* cannot be decrypted.");
+call mtr.add_suppression("InnoDB: Block in space_id .*");
+call mtr.add_suppression("InnoDB: However key management plugin or used key_version .*");
+call mtr.add_suppression("InnoDB: The page .*");
 
 --echo # Restart mysqld --file-key-management-filename=keys2.txt
 -- let $restart_parameters=--file-key-management-filename=$MYSQL_TEST_DIR/std_data/keys2.txt

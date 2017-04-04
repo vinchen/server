@@ -3873,6 +3873,7 @@ dict_stats_rename_index(
 	char	dbname_utf8[MAX_DB_UTF8_LEN];
 	char	tablename_utf8[MAX_TABLE_UTF8_LEN];
 
+
 	dict_fs2utf8(table->name.m_name, dbname_utf8, sizeof(dbname_utf8),
 		     tablename_utf8, sizeof(tablename_utf8));
 
