@@ -474,16 +474,17 @@ fil_space_set_crypt_data(
 
 /******************************************************************
 Parse a MLOG_FILE_WRITE_CRYPT_DATA log entry
-@param[in]	ptr		Log entry start
+@param[in,out]	ptr		Log entry start
 @param[in]	end_ptr		Log entry end
 @param[in]	block		buffer block
 @return position on log buffer */
 UNIV_INTERN
-const byte*
+byte*
 fil_parse_write_crypt_data(
-	const byte*		ptr,
+	byte*			ptr,
 	const byte*		end_ptr,
-	const buf_block_t*	block)
+	const buf_block_t*	block,
+	dberr_t*		err)
 {
 	/* check that redo log entry is complete */
 	uint entry_size =
@@ -494,6 +495,8 @@ fil_parse_write_crypt_data(
 		4 +  // size of min_key_version
 		4 +  // size of key_id
 		1; // fil_encryption_t
+
+	*err = DB_SUCCESS;
 
 	if (ptr + entry_size > end_ptr) {
 		return NULL;
@@ -539,6 +542,11 @@ fil_parse_write_crypt_data(
 	if (space) {
 		crypt_data = fil_space_set_crypt_data(space, crypt_data);
 		fil_space_release(space);
+	}
+
+	/* Check is used key found from encryption plugin */
+	if (crypt_data->should_encrypt() && !crypt_data->is_key_found()) {
+		*err = DB_DECRYPTION_FAILED;
 	}
 
 	return ptr;
@@ -960,11 +968,12 @@ fil_space_verify_crypt_checksum(
 
 	/* If page is not encrypted, return false */
 	if (key_version == 0) {
-		return false;
+		return(false);
 	}
 
 	srv_checksum_algorithm_t algorithm =
 			static_cast<srv_checksum_algorithm_t>(srv_checksum_algorithm);
+
 	/* If no checksum is used, can't continue checking. */
 	if (algorithm == SRV_CHECKSUM_ALGORITHM_NONE) {
 		return(true);
@@ -988,28 +997,31 @@ fil_space_verify_crypt_checksum(
 		return (true);
 	}
 
-	/* Compressed pages use different checksum method. We first store
-	the post encryption checksum on checksum location and after function
-	restore the original. */
+	ib_uint32_t cchecksum1=0;
+	ib_uint32_t cchecksum2=0;
+
+	/* Calculate checksums */
 	if (zip_size) {
-		ib_uint32_t old = static_cast<ib_uint32_t>(mach_read_from_4(
-				page + FIL_PAGE_SPACE_OR_CHKSUM));
+		cchecksum1 = page_zip_calc_checksum(
+			page, zip_size, SRV_CHECKSUM_ALGORITHM_CRC32);
 
-		mach_write_to_4(page + FIL_PAGE_SPACE_OR_CHKSUM, checksum);
+		if(cchecksum1 != checksum) {
+			cchecksum2 = page_zip_calc_checksum(
+				page, zip_size,
+				SRV_CHECKSUM_ALGORITHM_INNODB);
+		}
+	} else {
+		cchecksum1 = buf_calc_page_crc32(page);
 
-		bool valid = page_zip_verify_checksum(page, zip_size);
-
-		mach_write_to_4(page + FIL_PAGE_SPACE_OR_CHKSUM, old);
-
-		return (valid);
+		if (cchecksum1 != checksum) {
+			cchecksum2 = (ib_uint32_t) buf_calc_page_new_checksum(
+				page);
+		}
 	}
 
 	/* If stored checksum matches one of the calculated checksums
 	page is not corrupted. */
 
-	ib_uint32_t cchecksum1 = buf_calc_page_crc32(page);
-	ib_uint32_t cchecksum2 = (ib_uint32_t) buf_calc_page_new_checksum(
-				page);
 	bool encrypted = (checksum == cchecksum1 || checksum == cchecksum2
 		|| checksum == BUF_NO_CHECKSUM_MAGIC);
 
@@ -1967,11 +1979,14 @@ fil_crypt_rotate_page(
 		bool modified = false;
 		int needs_scrubbing = BTR_SCRUB_SKIP_PAGE;
 		lsn_t block_lsn = block->page.newest_modification;
+		byte* frame = buf_block_get_frame(block);
+		/* Here can't read key version from page as
+		FIL_PAGE_FILE_FLUSH_LSN_OR_KEY_VERSION field is initialized
+		after decryption on fil_space_decrypt() */
 		uint kv =  block->page.key_version;
 
 		/* check if tablespace is closing after reading page */
-		if (space->is_stopping()) {
-			byte* frame = buf_block_get_frame(block);
+		if (!space->is_stopping()) {
 
 			if (kv == 0 &&
 				fil_crypt_is_page_uninitialized(frame, zip_size)) {
@@ -1992,9 +2007,6 @@ fil_crypt_rotate_page(
 				mlog_write_ulint(frame +
 					FIL_PAGE_ARCH_LOG_NO_OR_SPACE_ID,
 					space_id, MLOG_4BYTES, &mtr);
-
-				/* update block */
-				block->page.key_version = key_state->key_version;
 
 				/* statistics */
 				state->crypt_stat.pages_modified++;

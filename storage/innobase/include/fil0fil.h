@@ -1389,13 +1389,6 @@ fil_space_get(
 /*******************************************************************//**
 Returns the table space by a given id, NULL if not found. */
 fil_space_t*
-fil_space_found_by_id(
-/*==================*/
-	ulint	id);	/*!< in: space id */
-
-/*******************************************************************//**
-Returns the table space by a given id, NULL if not found. */
-fil_space_t*
 fil_space_get_by_id(
 /*================*/
 	ulint	id);	/*!< in: space id */
