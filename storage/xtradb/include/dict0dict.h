@@ -1820,6 +1820,15 @@ dict_set_corrupted_by_space(
 /*========================*/
 	ulint		space_id);	/*!< in: space ID */
 
+/**********************************************************************//**
+Flags a table with specified space_id encrypted in the data dictionary
+cache
+@param[in]	space_id	Tablespace id */
+UNIV_INTERN
+void
+dict_set_encrypted_by_space(
+	ulint	space_id);
+
 /********************************************************************//**
 Validate the table flags.
 @return	true if valid. */
@@ -1900,14 +1909,6 @@ dict_table_get_index_on_first_col(
 						in table */
 
 #endif /* !UNIV_HOTBACKUP */
-/*************************************************************************
-set is_corrupt flag by space_id*/
-
-void
-dict_table_set_corrupt_by_space(
-/*============================*/
-	ulint	space_id,
-	ibool	need_mutex);
 
 #ifndef UNIV_NONINL
 #include "dict0dict.ic"

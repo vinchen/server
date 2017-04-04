@@ -51,7 +51,6 @@ typedef struct st_innobase_share {
 	innodb_idx_translate_t	idx_trans_tbl;	/*!< index translation
 						table between MySQL and
 						Innodb */
-	dict_table_t*		ib_table;
 } INNOBASE_SHARE;
 
 

@@ -5780,17 +5780,17 @@ ha_innobase::open(
 		    && (table->s->fields
 			!= dict_table_get_n_user_cols(ib_table) - 1)))) {
 		ib_logf(IB_LOG_LEVEL_WARN,
-			"table %s contains %lu user defined columns "
-			"in InnoDB, but %lu columns in MySQL. Please "
+			"table %s contains " ULINTPF " user defined columns "
+			"in InnoDB, but %u columns in MySQL. Please "
 			"check INFORMATION_SCHEMA.INNODB_SYS_COLUMNS and "
 			REFMAN "innodb-troubleshooting.html "
 			"for how to resolve it",
-			norm_name, (ulong) dict_table_get_n_user_cols(ib_table),
-			(ulong) table->s->fields);
+			norm_name, dict_table_get_n_user_cols(ib_table),
+			table->s->fields);
 
 		/* Mark this table as corrupted, so the drop table
 		or force recovery can still use it, but not others. */
-		ib_table->corrupted = true;
+		ib_table->file_unreadable = true;
 		dict_table_close(ib_table, FALSE, FALSE);
 		ib_table = NULL;
 		is_part = NULL;
@@ -5890,7 +5890,7 @@ table_opened:
 	ib_table->thd = (void*)thd;
 
 	/* No point to init any statistics if tablespace is still encrypted. */
-	if (!ib_table->is_encrypted) {
+	if (!ib_table->file_unreadable) {
 		dict_stats_init(ib_table);
 	} else {
 		ib_table->stat_initialized = 1;
@@ -5898,7 +5898,9 @@ table_opened:
 
 	MONITOR_INC(MONITOR_TABLE_OPEN);
 
-	bool	no_tablespace;
+	bool	no_tablespace = false;
+	bool	encrypted = false;
+	fil_space_t* space = NULL;
 
 	if (dict_table_is_discarded(ib_table)) {
 
@@ -5913,21 +5915,27 @@ table_opened:
 
 		no_tablespace = false;
 
-	} else if (ib_table->ibd_file_missing) {
+	} else if (ib_table->file_unreadable) {
 
-		ib_senderrf(
-			thd, IB_LOG_LEVEL_WARN,
-			ER_TABLESPACE_MISSING, norm_name);
+		if ((space = fil_space_acquire_silent(ib_table->space))) {
+			if (space->crypt_data && space->crypt_data->is_encrypted()) {
+				/* This means that tablespace was found but we could not
+				decrypt encrypted page. */
+				no_tablespace = true;
+				encrypted = true;
+			} else {
+				no_tablespace = true;
+			}
+		} else {
+			ib_senderrf(
+				thd, IB_LOG_LEVEL_WARN,
+				ER_TABLESPACE_MISSING, norm_name);
 
-		/* This means we have no idea what happened to the tablespace
-		file, best to play it safe. */
+			/* This means we have no idea what happened to the tablespace
+			file, best to play it safe. */
 
-		no_tablespace = true;
-	} else if (ib_table->is_encrypted) {
-		/* This means that tablespace was found but we could not
-		decrypt encrypted page. */
-		no_tablespace = true;
-		ib_table->ibd_file_missing = true;
+			no_tablespace = true;
+		}
 	} else {
 		no_tablespace = false;
 	}
@@ -5940,29 +5948,36 @@ table_opened:
 		/* If table has no talespace but it has crypt data, check
 		is tablespace made unaccessible because encryption service
 		or used key_id is not available. */
-		if (ib_table) {
-			fil_space_crypt_t* crypt_data = ib_table->crypt_data;
+		if (encrypted) {
+			bool warning_pushed = false;
 
-			if (crypt_data && crypt_data->should_encrypt()) {
+			if (!encryption_key_id_exists(space->crypt_data->key_id)) {
+				push_warning_printf(thd, Sql_condition::WARN_LEVEL_WARN,
+					HA_ERR_DECRYPTION_FAILED,
+					"Table %s is encrypted but encryption service or"
+					" used key_id %u is not available. "
+					" Can't continue reading table.",
+					space->name, space->crypt_data->key_id);
+				ret_err = HA_ERR_DECRYPTION_FAILED;
+				warning_pushed = true;
+			}
 
-				if (!encryption_key_id_exists(crypt_data->key_id)) {
-					push_warning_printf(thd, Sql_condition::WARN_LEVEL_WARN,
-						HA_ERR_DECRYPTION_FAILED,
-						"Table %s is encrypted but encryption service or"
-						" used key_id %u is not available. "
-						" Can't continue reading table.",
-						ib_table->name, crypt_data->key_id);
-					ret_err = HA_ERR_DECRYPTION_FAILED;
-				}
-			} else if (ib_table->is_encrypted) {
+			/* If table is marked as encrypted then we push
+			warning if it has not been already done as used
+			key_id might be found but it is incorrect. */
+			if (!warning_pushed) {
 				push_warning_printf(thd, Sql_condition::WARN_LEVEL_WARN,
 					HA_ERR_DECRYPTION_FAILED,
 					"Table %s is encrypted but encryption service or"
 					" used key_id is not available. "
 					" Can't continue reading table.",
-					ib_table->name);
+					space->name);
 				ret_err = HA_ERR_DECRYPTION_FAILED;
 			}
+		}
+
+		if (space) {
+			fil_space_release(space);
 		}
 
 		dict_table_close(ib_table, FALSE, FALSE);
@@ -6096,7 +6111,7 @@ table_opened:
 
 	/* Only if the table has an AUTOINC column. */
 	if (prebuilt->table != NULL
-	    && !prebuilt->table->ibd_file_missing
+	    && !prebuilt->table->file_unreadable
 	    && table->found_next_number_field != NULL) {
 		dict_table_autoinc_lock(prebuilt->table);
 
@@ -9595,6 +9610,15 @@ ha_innobase::general_fetch(
 
 	ut_a(prebuilt->trx == thd_to_trx(user_thd));
 
+	if (prebuilt->table->corrupted) {
+		DBUG_RETURN(HA_ERR_CRASHED);
+	}
+
+	if (prebuilt->table->file_unreadable
+	    && fil_space_get(prebuilt->table->space) != NULL) {
+		DBUG_RETURN(HA_ERR_DECRYPTION_FAILED);
+	}
+
 	innobase_srv_conc_enter_innodb(prebuilt->trx);
 
 	ret = row_search_for_mysql(
@@ -12337,7 +12361,7 @@ ha_innobase::discard_or_import_tablespace(
 		user may want to set the DISCARD flag in order to IMPORT
 		a new tablespace. */
 
-		if (dict_table->ibd_file_missing) {
+		if (dict_table->file_unreadable) {
 			ib_senderrf(
 				prebuilt->trx->mysql_thd,
 				IB_LOG_LEVEL_WARN, ER_TABLESPACE_MISSING,
@@ -12347,7 +12371,7 @@ ha_innobase::discard_or_import_tablespace(
 		err = row_discard_tablespace_for_mysql(
 			dict_table->name, prebuilt->trx);
 
-	} else if (!dict_table->ibd_file_missing) {
+	} else if (!dict_table->file_unreadable) {
 		/* Commit the transaction in order to
 		release the table lock. */
 		trx_commit_for_mysql(prebuilt->trx);
@@ -13908,7 +13932,8 @@ ha_innobase::check(
 
 		DBUG_RETURN(HA_ADMIN_CORRUPT);
 
-	} else if (prebuilt->table->ibd_file_missing) {
+	} else if (prebuilt->table->file_unreadable &&
+		   fil_space_get(prebuilt->table->space) == NULL) {
 
 		ib_senderrf(
 			thd, IB_LOG_LEVEL_ERROR,
@@ -15032,7 +15057,7 @@ ha_innobase::transactional_table_lock(
 				ER_TABLESPACE_DISCARDED,
 				table->s->table_name.str);
 
-		} else if (prebuilt->table->ibd_file_missing) {
+		} else if (prebuilt->table->file_unreadable) {
 
 			ib_senderrf(
 				thd, IB_LOG_LEVEL_ERROR,

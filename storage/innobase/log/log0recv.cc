@@ -1297,7 +1297,12 @@ recv_parse_or_apply_log_rec_body(
 		}
 		break;
 	case MLOG_FILE_WRITE_CRYPT_DATA:
-		ptr = const_cast<byte*>(fil_parse_write_crypt_data(ptr, end_ptr, block));
+		dberr_t err;
+		ptr = const_cast<byte*>(fil_parse_write_crypt_data(ptr, end_ptr, block, &err));
+
+		if (err != DB_SUCCESS) {
+			recv_sys->found_corrupt_log = TRUE;
+		}
 		break;
 	default:
 		ptr = NULL;
@@ -1768,9 +1773,10 @@ recv_read_in_area(
 
 /** Apply the hash table of stored log records to persistent data pages.
 @param[in]	last_batch	whether the change buffer merge will be
-				performed as part of the operation */
+				performed as part of the operation
+@return DB_SUCCESS or DB_DECRYPTION_FAILED */
 UNIV_INTERN
-void
+dberr_t
 recv_apply_hashed_log_recs(bool last_batch)
 {
 	for (;;) {
@@ -1778,6 +1784,11 @@ recv_apply_hashed_log_recs(bool last_batch)
 
 		if (!recv_sys->apply_batch_on) {
 			break;
+		}
+
+		if (recv_sys->found_corrupt_log) {
+			mutex_exit(&recv_sys->mutex);
+			return(DB_DECRYPTION_FAILED);
 		}
 
 		mutex_exit(&recv_sys->mutex);
@@ -1844,6 +1855,10 @@ recv_apply_hashed_log_recs(bool last_batch)
 
 		mutex_exit(&(recv_sys->mutex));
 
+		if (recv_sys->found_corrupt_log) {
+			return(DB_DECRYPTION_FAILED);
+		}
+
 		os_thread_sleep(500000);
 
 		mutex_enter(&(recv_sys->mutex));
@@ -1890,6 +1905,8 @@ recv_apply_hashed_log_recs(bool last_batch)
 	recv_sys_empty_hash();
 
 	mutex_exit(&recv_sys->mutex);
+
+	return (DB_SUCCESS);
 }
 #else /* !UNIV_HOTBACKUP */
 /*******************************************************************//**

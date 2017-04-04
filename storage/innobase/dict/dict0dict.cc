@@ -2,7 +2,7 @@
 
 Copyright (c) 1996, 2016, Oracle and/or its affiliates. All Rights Reserved.
 Copyright (c) 2012, Facebook Inc.
-Copyright (c) 2013, 2015, MariaDB Corporation.
+Copyright (c) 2013, 2017, MariaDB Corporation.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -1187,7 +1187,7 @@ dict_table_open_on_name(
 
 		/* If table is encrypted return table */
 		if (ignore_err == DICT_ERR_IGNORE_NONE
-			&& table->is_encrypted) {
+			&& table->file_unreadable) {
 			/* Make life easy for drop table. */
 			if (table->can_be_evicted) {
 				dict_table_move_from_lru_to_non_lru(table);
@@ -6183,9 +6183,27 @@ dict_set_corrupted_by_space(
 
 	/* mark the table->corrupted bit only, since the caller
 	could be too deep in the stack for SYS_INDEXES update */
-	table->corrupted = TRUE;
+	table->corrupted = true;
 
 	return(TRUE);
+}
+
+/**********************************************************************//**
+Flags a table with specified space_id encrypted in the data dictionary
+cache
+@param[in]	space_id	Tablespace id */
+UNIV_INTERN
+void
+dict_set_encrypted_by_space(
+	ulint	space_id)
+{
+	dict_table_t*   table;
+
+	table = dict_find_table_by_space(space_id);
+
+	if (table) {
+		table->file_unreadable = true;
+	}
 }
 
 /**********************************************************************//**
@@ -6645,7 +6663,8 @@ dict_table_schema_check(
 		}
 	}
 
-	if (table->ibd_file_missing) {
+	if (table->file_unreadable &&
+	    fil_space_get(table->space) == NULL) {
 		/* missing tablespace */
 
 		ut_snprintf(errstr, errstr_sz,

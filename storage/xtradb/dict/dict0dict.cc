@@ -1187,7 +1187,7 @@ dict_table_open_on_name(
 
 		/* If table is encrypted return table */
 		if (ignore_err == DICT_ERR_IGNORE_NONE
-			&& table->is_encrypted) {
+			&& table->file_unreadable) {
 			/* Make life easy for drop table. */
 			if (table->can_be_evicted) {
 				dict_table_move_from_lru_to_non_lru(table);
@@ -6183,9 +6183,27 @@ dict_set_corrupted_by_space(
 
 	/* mark the table->corrupted bit only, since the caller
 	could be too deep in the stack for SYS_INDEXES update */
-	table->corrupted = TRUE;
+	table->corrupted = true;
 
 	return(TRUE);
+}
+
+/**********************************************************************//**
+Flags a table with specified space_id encrypted in the data dictionary
+cache
+@param[in]	space_id	Tablespace id */
+UNIV_INTERN
+void
+dict_set_encrypted_by_space(
+	ulint	space_id)
+{
+	dict_table_t*   table;
+
+	table = dict_find_table_by_space(space_id);
+
+	if (table) {
+		table->file_unreadable = true;
+	}
 }
 
 /**********************************************************************//**
@@ -6325,43 +6343,6 @@ dict_set_corrupted_index_cache_only(
 	index->type |= DICT_CORRUPT;
 }
 
-/*************************************************************************
-set is_corrupt flag by space_id*/
-
-void
-dict_table_set_corrupt_by_space(
-/*============================*/
-	ulint	space_id,
-	ibool	need_mutex)
-{
-	dict_table_t*	table;
-	ibool		found = FALSE;
-
-	ut_a(space_id != 0 && space_id < SRV_LOG_SPACE_FIRST_ID);
-
-	if (need_mutex)
-		mutex_enter(&(dict_sys->mutex));
-
-	table = UT_LIST_GET_FIRST(dict_sys->table_LRU);
-
-	while (table) {
-		if (table->space == space_id) {
-			table->is_corrupt = TRUE;
-			found = TRUE;
-		}
-
-		table = UT_LIST_GET_NEXT(table_LRU, table);
-	}
-
-	if (need_mutex)
-		mutex_exit(&(dict_sys->mutex));
-
-	if (!found) {
-		fprintf(stderr, "InnoDB: space to be marked as "
-			"crashed was not found for id " ULINTPF ".\n",
-			space_id);
-	}
-}
 #endif /* !UNIV_HOTBACKUP */
 
 /**********************************************************************//**
@@ -6683,7 +6664,8 @@ dict_table_schema_check(
 		}
 	}
 
-	if (table->ibd_file_missing) {
+	if (table->file_unreadable &&
+	    fil_space_get(table->space) == NULL) {
 		/* missing tablespace */
 
 		ut_snprintf(errstr, errstr_sz,
