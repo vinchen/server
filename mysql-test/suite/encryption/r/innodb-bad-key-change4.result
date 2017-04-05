@@ -1,6 +1,5 @@
 call mtr.add_suppression("InnoDB: The page .*");
 call mtr.add_suppression(".*InnoDB: Cannot open table .*");
-call mtr.add_suppression("InnoDB: .ibd file is missing for table test/.*");
 call mtr.add_suppression("Couldn't load plugins from 'file_key_management.*");
 SET GLOBAL innodb_file_format = `Barracuda`;
 SET GLOBAL innodb_file_per_table = ON;

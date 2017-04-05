@@ -1,3 +1,5 @@
+SET GLOBAL innodb_file_format = `Barracuda`;
+SET GLOBAL innodb_file_per_table = ON;
 set global innodb_compression_algorithm = 1;
 create table innodb_normal(c1 bigint not null, b char(200)) engine=innodb page_compressed=1;
 show warnings;
@@ -51,7 +53,9 @@ SELECT variable_value > 0 FROM information_schema.global_status WHERE variable_n
 variable_value > 0
 SELECT variable_value >= 0 FROM information_schema.global_status WHERE variable_name = 'innodb_num_pages_decompressed';
 variable_value >= 0
-SET GLOBAL innodb_encrypt_tables=OFF;
+SET GLOBAL innodb_file_format = `Barracuda`;
+SET GLOBAL innodb_file_per_table = ON;
+set global innodb_compression_algorithm = 1;
 alter table innodb_normal engine=innodb page_compressed=DEFAULT;
 show create table innodb_normal;
 Table	Create Table
@@ -73,9 +77,6 @@ innodb_dynamic	CREATE TABLE `innodb_dynamic` (
   `c1` bigint(20) NOT NULL,
   `b` char(200) DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=latin1 ROW_FORMAT=DYNAMIC
-Timeout in wait_condition.inc for select variable_value > 0 from information_schema.global_status where variable_name = 'INNODB_NUM_PAGES_PAGE_DECRYPTED'
-Id	User	Host	db	Command	Time	State	Info	Progress
-3	root	localhost	test	Query	0	init	show full processlist	0.000
 SELECT variable_value >= 0 FROM information_schema.global_status WHERE variable_name = 'innodb_num_pages_encrypted';
 variable_value >= 0
 1
@@ -90,3 +91,5 @@ drop procedure innodb_insert_proc;
 drop table innodb_normal;
 drop table innodb_compact;
 drop table innodb_dynamic;
+Warnings:
+Warning	131	Using innodb_file_format is deprecated and the parameter may be removed in future releases. See http://dev.mysql.com/doc/refman/5.7/en/innodb-file-format.html

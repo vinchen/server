@@ -11,8 +11,10 @@ call mtr.add_suppression("InnoDB: The page .*");
 call mtr.add_suppression(".*InnoDB: Cannot open table .*");
 # Suppression for builds where file_key_management plugin is linked statically
 call mtr.add_suppression("Couldn't load plugins from 'file_key_management.*");
+
 --let $restart_parameters=--plugin-load-add=file_key_management.so --file-key-management --file-key-management-filename=$MYSQL_TEST_DIR/std_data/keys2.txt
 --source include/restart_mysqld.inc
+
 --disable_warnings
 SET GLOBAL innodb_file_format = `Barracuda`;
 SET GLOBAL innodb_file_per_table = ON;
