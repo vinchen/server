@@ -1767,16 +1767,6 @@ dict_close(void);
 /*============*/
 #ifndef UNIV_HOTBACKUP
 /**********************************************************************//**
-Check whether the table is corrupted.
-@return	nonzero for corrupted table, zero for valid tables */
-UNIV_INLINE
-ulint
-dict_table_is_corrupted(
-/*====================*/
-	const dict_table_t*	table)	/*!< in: table */
-	MY_ATTRIBUTE((nonnull, warn_unused_result));
-
-/**********************************************************************//**
 Check whether the index is corrupted.
 @return	nonzero for corrupted index, zero for valid indexes */
 UNIV_INLINE

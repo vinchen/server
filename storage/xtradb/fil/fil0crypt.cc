@@ -474,7 +474,7 @@ fil_space_set_crypt_data(
 
 /******************************************************************
 Parse a MLOG_FILE_WRITE_CRYPT_DATA log entry
-@param[in,out]	ptr		Log entry start
+@param[in]	ptr		Log entry start
 @param[in]	end_ptr		Log entry end
 @param[in]	block		buffer block
 @return position on log buffer */
@@ -716,6 +716,10 @@ fil_space_encrypt(
 		}
 
 		bool corrupted = buf_page_is_corrupted(true, tmp_mem, zip_size, space);
+		ulint f1 = mach_read_from_4(src+FIL_PAGE_FILE_FLUSH_LSN_OR_KEY_VERSION);
+		ulint f2 = mach_read_from_4(src+FIL_PAGE_FILE_FLUSH_LSN_OR_KEY_VERSION+4);
+		mach_write_to_4(tmp_mem+FIL_PAGE_FILE_FLUSH_LSN_OR_KEY_VERSION, f1);
+		mach_write_to_4(tmp_mem+FIL_PAGE_FILE_FLUSH_LSN_OR_KEY_VERSION+4, f2);
 		bool different = memcmp(src, tmp_mem, size);
 
 		if (!ok || corrupted || corrupted1 || err != DB_SUCCESS || different) {
@@ -774,25 +778,6 @@ fil_space_decrypt(
 		return false;
 	}
 
-	if (crypt_data == NULL) {
-		if (!(space == 0 && offset == 0) && key_version != 0) {
-			/* FIL_PAGE_FILE_FLUSH_LSN field i.e.
-			FIL_PAGE_FILE_FLUSH_LSN_OR_KEY_VERSION
-			should be only defined for the
-			first page in a system tablespace
-			data file (ibdata*, not *.ibd), if not
-			clear it. */
-
-			DBUG_PRINT("ib_crypt",
-				("Page on space %lu offset %lu has key_version %u"
-				" when it shoud be undefined.",
-				space, offset, key_version));
-
-			mach_write_to_4(src_frame + FIL_PAGE_FILE_FLUSH_LSN_OR_KEY_VERSION, 0);
-		}
-		return false;
-	}
-
 	ut_a(crypt_data != NULL && crypt_data->is_encrypted());
 
 	/* read space & lsn */
@@ -844,9 +829,6 @@ fil_space_decrypt(
 		memcpy(tmp_frame + page_size - FIL_PAGE_DATA_END,
 		       src_frame + page_size - FIL_PAGE_DATA_END,
 		       FIL_PAGE_DATA_END);
-
-		// clear key-version & crypt-checksum from dst
-		memset(tmp_frame + FIL_PAGE_FILE_FLUSH_LSN_OR_KEY_VERSION, 0, 8);
 	}
 
 	srv_stats.pages_decrypted.inc();
@@ -997,8 +979,8 @@ fil_space_verify_crypt_checksum(
 		return (true);
 	}
 
-	ib_uint32_t cchecksum1=0;
-	ib_uint32_t cchecksum2=0;
+	ib_uint32_t cchecksum1 = 0;
+	ib_uint32_t cchecksum2 = 0;
 
 	/* Calculate checksums */
 	if (zip_size) {
@@ -1055,10 +1037,15 @@ fil_space_verify_crypt_checksum(
 	ulint checksum2 = mach_read_from_4(
 		page + UNIV_PAGE_SIZE - FIL_PAGE_END_LSN_OLD_CHKSUM);
 
+	bool valid;
 
-	bool valid = (buf_page_is_checksum_valid_crc32(page,checksum1,checksum2)
+	if (zip_size) {
+		valid = (checksum1 == cchecksum1 || checksum1 == cchecksum2);
+	} else {
+		valid = (buf_page_is_checksum_valid_crc32(page,checksum1,checksum2)
 		|| buf_page_is_checksum_valid_none(page,checksum1,checksum2)
 		|| buf_page_is_checksum_valid_innodb(page,checksum1, checksum2));
+	}
 
 	if (encrypted && valid) {
 		/* If page is encrypted and traditional checksums match,
@@ -1980,10 +1967,7 @@ fil_crypt_rotate_page(
 		int needs_scrubbing = BTR_SCRUB_SKIP_PAGE;
 		lsn_t block_lsn = block->page.newest_modification;
 		byte* frame = buf_block_get_frame(block);
-		/* Here can't read key version from page as
-		FIL_PAGE_FILE_FLUSH_LSN_OR_KEY_VERSION field is initialized
-		after decryption on fil_space_decrypt() */
-		uint kv =  block->page.key_version;
+		uint kv =  mach_read_from_4(frame+FIL_PAGE_FILE_FLUSH_LSN_OR_KEY_VERSION);
 
 		/* check if tablespace is closing after reading page */
 		if (!space->is_stopping()) {
@@ -2098,6 +2082,11 @@ fil_crypt_rotate_page(
 				state->end_lsn = block_lsn;
 			}
 		}
+	} else {
+		/* If block read failed mtr memo and log should be empty. */
+		ut_ad(dyn_array_get_data_size(&mtr.memo) == 0
+			&& dyn_array_get_data_size(&mtr.log) == 0);
+		mtr_commit(&mtr);
 	}
 
 	if (sleeptime_ms) {

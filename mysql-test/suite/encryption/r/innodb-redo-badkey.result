@@ -36,5 +36,7 @@ COMMIT;
 # Kill the server
 # restart
 # Kill the server
+# Restart mysqld --innodb-force-recovery=1
+# Kill the server
 # Restart mysqld --file-key-management-filename=keys2.txt
 drop table t1, t2,t3,t4;

@@ -417,7 +417,7 @@ btr_pcur_move_to_next_page(
 
 	page = btr_pcur_get_page(cursor);
 
-	if (!page) {
+	if (UNIV_UNLIKELY(!page)) {
 		return;
 	}
 
@@ -431,9 +431,10 @@ btr_pcur_move_to_next_page(
 				   cursor->latch_mode,
 				   btr_pcur_get_btr_cur(cursor)->index, mtr);
 
-	if (!next_block) {
+	if (UNIV_UNLIKELY(!next_block)) {
 		return;
 	}
+
 	next_page = buf_block_get_frame(next_block);
 #ifdef UNIV_BTR_DEBUG
 	ut_a(page_is_comp(next_page) == page_is_comp(page));

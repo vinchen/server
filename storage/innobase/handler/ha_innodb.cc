@@ -5675,20 +5675,23 @@ ha_innobase::innobase_initialize_autoinc()
 			break;
 		}
 		case DB_RECORD_NOT_FOUND:
-			ut_print_timestamp(stderr);
-			fprintf(stderr, "  InnoDB: MySQL and InnoDB data "
-				"dictionaries are out of sync.\n"
-				"InnoDB: Unable to find the AUTOINC column "
-				"%s in the InnoDB table %s.\n"
-				"InnoDB: We set the next AUTOINC column "
-				"value to 0,\n"
-				"InnoDB: in effect disabling the AUTOINC "
-				"next value generation.\n"
-				"InnoDB: You can either set the next "
-				"AUTOINC value explicitly using ALTER TABLE\n"
-				"InnoDB: or fix the data dictionary by "
-				"recreating the table.\n",
-				col_name, index->table->name);
+			char		buf[MAX_FULL_NAME_LEN];
+			ut_format_name(index->table->name, TRUE, buf, sizeof(buf));
+
+			ib_logf(IB_LOG_LEVEL_ERROR,
+				"MySQL and InnoDB data "
+				"dictionaries are out of sync."
+				" Unable to find the AUTOINC column "
+				" %s in the InnoDB table %s."
+				" We set the next AUTOINC column "
+				"value to 0"
+				" in effect disabling the AUTOINC "
+				"next value generation."
+				" You can either set the next "
+				"AUTOINC value explicitly using ALTER TABLE "
+				" or fix the data dictionary by "
+				"recreating the table.",
+				col_name, buf);
 
 			/* This will disable the AUTOINC generation. */
 			auto_inc = 0;
@@ -5791,6 +5794,7 @@ ha_innobase::open(
 		/* Mark this table as corrupted, so the drop table
 		or force recovery can still use it, but not others. */
 		ib_table->file_unreadable = true;
+		ib_table->corrupted = true;
 		dict_table_close(ib_table, FALSE, FALSE);
 		ib_table = NULL;
 		is_part = NULL;
@@ -5890,7 +5894,7 @@ table_opened:
 	ib_table->thd = (void*)thd;
 
 	/* No point to init any statistics if tablespace is still encrypted. */
-	if (!ib_table->file_unreadable) {
+	if (ib_table->is_readable()) {
 		dict_stats_init(ib_table);
 	} else {
 		ib_table->stat_initialized = 1;
@@ -5900,7 +5904,7 @@ table_opened:
 
 	bool	no_tablespace = false;
 	bool	encrypted = false;
-	fil_space_t* space = NULL;
+	FilSpace space(ib_table->space, true);
 
 	if (dict_table_is_discarded(ib_table)) {
 
@@ -5915,10 +5919,10 @@ table_opened:
 
 		no_tablespace = false;
 
-	} else if (ib_table->file_unreadable) {
+	} else if (!ib_table->is_readable()) {
 
-		if ((space = fil_space_acquire_silent(ib_table->space))) {
-			if (space->crypt_data && space->crypt_data->is_encrypted()) {
+		if (space()) {
+			if (space()->crypt_data && space()->crypt_data->is_encrypted()) {
 				/* This means that tablespace was found but we could not
 				decrypt encrypted page. */
 				no_tablespace = true;
@@ -5951,13 +5955,17 @@ table_opened:
 		if (encrypted) {
 			bool warning_pushed = false;
 
-			if (!encryption_key_id_exists(space->crypt_data->key_id)) {
+			char	buf[MAX_FULL_NAME_LEN];
+			ut_format_name(ib_table->name, TRUE, buf, sizeof(buf));
+
+			if (!encryption_key_id_exists(space()->crypt_data->key_id)) {
 				push_warning_printf(thd, Sql_condition::WARN_LEVEL_WARN,
 					HA_ERR_DECRYPTION_FAILED,
-					"Table %s is encrypted but encryption service or"
+					"Table %s in file %s is encrypted but encryption service or"
 					" used key_id %u is not available. "
 					" Can't continue reading table.",
-					space->name, space->crypt_data->key_id);
+					buf, space()->chain.start->name,
+					space()->crypt_data->key_id);
 				ret_err = HA_ERR_DECRYPTION_FAILED;
 				warning_pushed = true;
 			}
@@ -5968,16 +5976,12 @@ table_opened:
 			if (!warning_pushed) {
 				push_warning_printf(thd, Sql_condition::WARN_LEVEL_WARN,
 					HA_ERR_DECRYPTION_FAILED,
-					"Table %s is encrypted but encryption service or"
+					"Table %s in file %s is encrypted but encryption service or"
 					" used key_id is not available. "
 					" Can't continue reading table.",
-					space->name);
+					buf, space()->chain.start->name);
 				ret_err = HA_ERR_DECRYPTION_FAILED;
 			}
-		}
-
-		if (space) {
-			fil_space_release(space);
 		}
 
 		dict_table_close(ib_table, FALSE, FALSE);
@@ -6111,7 +6115,7 @@ table_opened:
 
 	/* Only if the table has an AUTOINC column. */
 	if (prebuilt->table != NULL
-	    && !prebuilt->table->file_unreadable
+	    && prebuilt->table->is_readable()
 	    && table->found_next_number_field != NULL) {
 		dict_table_autoinc_lock(prebuilt->table);
 
@@ -9610,13 +9614,19 @@ ha_innobase::general_fetch(
 
 	ut_a(prebuilt->trx == thd_to_trx(user_thd));
 
-	if (prebuilt->table->corrupted) {
-		DBUG_RETURN(HA_ERR_CRASHED);
-	}
+	if (prebuilt->table->is_readable()) {
+	} else {
+		if (prebuilt->table->corrupted) {
+			DBUG_RETURN(HA_ERR_CRASHED);
+		} else {
+			FilSpace space(prebuilt->table->space, true);
 
-	if (prebuilt->table->file_unreadable
-	    && fil_space_get(prebuilt->table->space) != NULL) {
-		DBUG_RETURN(HA_ERR_DECRYPTION_FAILED);
+			if (space()) {
+				DBUG_RETURN(HA_ERR_DECRYPTION_FAILED);
+			} else {
+				DBUG_RETURN(HA_ERR_NO_SUCH_TABLE);
+			}
+		}
 	}
 
 	innobase_srv_conc_enter_innodb(prebuilt->trx);
@@ -12361,7 +12371,7 @@ ha_innobase::discard_or_import_tablespace(
 		user may want to set the DISCARD flag in order to IMPORT
 		a new tablespace. */
 
-		if (dict_table->file_unreadable) {
+		if (!dict_table->is_readable()) {
 			ib_senderrf(
 				prebuilt->trx->mysql_thd,
 				IB_LOG_LEVEL_WARN, ER_TABLESPACE_MISSING,
@@ -12371,7 +12381,7 @@ ha_innobase::discard_or_import_tablespace(
 		err = row_discard_tablespace_for_mysql(
 			dict_table->name, prebuilt->trx);
 
-	} else if (!dict_table->file_unreadable) {
+	} else if (dict_table->is_readable()) {
 		/* Commit the transaction in order to
 		release the table lock. */
 		trx_commit_for_mysql(prebuilt->trx);
@@ -15057,7 +15067,7 @@ ha_innobase::transactional_table_lock(
 				ER_TABLESPACE_DISCARDED,
 				table->s->table_name.str);
 
-		} else if (prebuilt->table->file_unreadable) {
+		} else if (!prebuilt->table->is_readable()) {
 
 			ib_senderrf(
 				thd, IB_LOG_LEVEL_ERROR,

@@ -3729,14 +3729,12 @@ row_search_for_mysql(
 
 		return(DB_TABLESPACE_DELETED);
 
-	} else if (prebuilt->table->file_unreadable &&
-		fil_space_get(prebuilt->table->space) == NULL) {
-
-		return(DB_TABLESPACE_NOT_FOUND);
-
-	} else if (prebuilt->table->file_unreadable) {
-
-		return(DB_DECRYPTION_FAILED);
+	} else if (!prebuilt->table->is_readable()) {
+		if (fil_space_get(prebuilt->table->space) == NULL) {
+			return(DB_TABLESPACE_NOT_FOUND);
+		} else {
+			return(DB_DECRYPTION_FAILED);
+		}
 	} else if (!prebuilt->index_usable) {
 
 		return(DB_MISSING_HISTORY);
@@ -4215,7 +4213,7 @@ rec_loop:
 
 	rec = btr_pcur_get_rec(pcur);
 
-	if (index->table->file_unreadable) {
+	if (!index->table->is_readable()) {
 		err = DB_DECRYPTION_FAILED;
 		goto lock_wait_or_error;
 	}
@@ -4368,21 +4366,22 @@ wrong_offs:
 	offsets = rec_get_offsets(rec, index, offsets, ULINT_UNDEFINED, &heap);
 
 	if (UNIV_UNLIKELY(srv_force_recovery > 0
-			  || (index->table->file_unreadable &&
+			|| (!index->table->is_readable() &&
 			      srv_pass_corrupt_table == 2))) {
 		if (!rec_validate(rec, offsets)
 		    || !btr_index_rec_validate(rec, index, FALSE)) {
+			char		buf[MAX_FULL_NAME_LEN];
+			ut_format_name(index->table->name, FALSE, buf, sizeof(buf));
+
 			ib_logf(IB_LOG_LEVEL_ERROR,
-				"Index corruption: rec offs " ULINTPF
+				"Index %s corrupted: rec offs " ULINTPF
 				" next offs " ULINTPF
-				", page no " ULINTPF " ,"
-				"InnoDB: ",
+				", page no " ULINTPF " ."
+				" We try to skip the record.",
+				buf,
 				page_offset(rec),
 				next_offs,
 				page_get_page_no(page_align(rec)));
-			dict_index_name_print(stderr, trx, index);
-			fputs(". We try to skip the record.\n",
-			      stderr);
 
 			goto next_rec;
 		}

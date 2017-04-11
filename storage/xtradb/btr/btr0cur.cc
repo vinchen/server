@@ -658,9 +658,10 @@ retry_page_get:
 		space, zip_size, page_no, rw_latch, guess, buf_mode,
 		file, line, mtr, &err);
 
-	/* Note that here we allow block == NULL and err == DB_SUCCESS
-	see below */
+	/* Note that block==NULL signifies either an error or change
+	buffering. */
 	if (err != DB_SUCCESS) {
+		ut_ad(block == NULL);
 		if (err == DB_DECRYPTION_FAILED) {
 			ib_push_warning((void *)NULL,
 				DB_DECRYPTION_FAILED,
@@ -946,7 +947,7 @@ btr_cur_open_at_index_side_func(
 	ulint		offsets_[REC_OFFS_NORMAL_SIZE];
 	ulint*		offsets		= offsets_;
 	dberr_t		err = DB_SUCCESS;
-	
+
 	rec_offs_init(offsets_);
 
 	estimate = latch_mode & BTR_ESTIMATE;
@@ -1178,6 +1179,7 @@ btr_cur_open_at_rnd_pos_func(
 					index->table->name);
 				index->table->file_unreadable = true;
 			}
+
 			goto exit_loop;
 		}
 
@@ -3877,7 +3879,6 @@ btr_estimate_n_rows_in_range_on_level(
 			goto inexact;
 		}
 
-
 		page = buf_block_get_frame(block);
 
 		/* It is possible that the tree has been reorganized in the
@@ -4022,7 +4023,6 @@ btr_estimate_n_rows_in_range_low(
 	if (index->table->file_unreadable) {
 		return (0);
 	}
-
 
 	mtr_start_trx(&mtr, trx);
 

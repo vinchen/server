@@ -41,8 +41,8 @@ released by the i/o-handler thread.
 @param[in]	offset		page number
 @param[in]	trx		transaction
 @return DB_SUCCESS if page has been read and is not corrupted,
-DB_PAGE_CORRUPTED if page based on checksum check is corrupted,
-DB_DECRYPTION_FAILED if page post encryption checksum matches but
+@retval DB_PAGE_CORRUPTED if page based on checksum check is corrupted,
+@retval DB_DECRYPTION_FAILED if page post encryption checksum matches but
 after decryption normal page checksum does not match.*/
 UNIV_INTERN
 dberr_t

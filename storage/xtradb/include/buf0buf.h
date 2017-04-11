@@ -1672,14 +1672,6 @@ struct buf_page_t{
 
 	bool            encrypted;	/*!< page is still encrypted */
 
-	/*!< For encrypted tables key_version is stored here before
-	page is decrypted because decryption will clear the
-	FIL_PAGE_FILE_FLUSH_LSN_OR_KEY_VERSION field and used
-	key_version is lost. Key rotation is naturally based on
-	fact what was the original key_version on the page. */
-
-	uint		key_version;
-
 	ulint           real_size;	/*!< Real size of the page
 					Normal pages == UNIV_PAGE_SIZE
 					page compressed pages, payload

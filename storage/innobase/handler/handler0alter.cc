@@ -1,7 +1,7 @@
 /*****************************************************************************
 
 Copyright (c) 2005, 2016, Oracle and/or its affiliates
-Copyright (c) 2013, 2016, MariaDB Corporation. All Rights Reserved.
+Copyright (c) 2013, 2017, MariaDB Corporation. All Rights Reserved.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -3129,7 +3129,7 @@ prepare_inplace_alter_table_dict(
 		clustered index of the old table, later. */
 		if (new_clustered
 		    || !ctx->online
-		    || user_table->file_unreadable
+		    || !user_table->is_readable()
 		    || dict_table_is_discarded(user_table)) {
 			/* No need to allocate a modification log. */
 			ut_ad(!ctx->add_index[a]->online_log);
@@ -3542,20 +3542,30 @@ ha_innobase::prepare_inplace_alter_table(
 
 	indexed_table = prebuilt->table;
 
-	if (indexed_table->file_unreadable &&
-	    fil_space_get(indexed_table->space) != NULL) {
-		String str;
-		const char* engine= table_type();
-		push_warning_printf(user_thd, Sql_condition::WARN_LEVEL_WARN,
-			HA_ERR_DECRYPTION_FAILED,
-			"Table %s is encrypted but encryption service or"
-			" used key_id is not available. "
-			" Can't continue reading table.",
-			indexed_table->name);
-		get_error_message(HA_ERR_DECRYPTION_FAILED, &str);
-		my_error(ER_GET_ERRMSG, MYF(0), HA_ERR_DECRYPTION_FAILED, str.c_ptr(), engine);
+	if (indexed_table->is_readable()) {
+	} else {
+		if (indexed_table->corrupted) {
+			/* Handled below */
+		} else {
+			FilSpace space(indexed_table->space, true);
 
-		DBUG_RETURN(true);
+			if (space()) {
+				String str;
+				const char* engine= table_type();
+				char	buf[MAX_FULL_NAME_LEN];
+				ut_format_name(indexed_table->name, TRUE, buf, sizeof(buf));
+
+				push_warning_printf(user_thd, Sql_condition::WARN_LEVEL_WARN,
+					HA_ERR_DECRYPTION_FAILED,
+					"Table %s in file %s is encrypted but encryption service or"
+					" used key_id is not available. "
+					" Can't continue reading table.",
+					buf, space()->chain.start->name);
+
+				my_error(ER_GET_ERRMSG, MYF(0), HA_ERR_DECRYPTION_FAILED, str.c_ptr(), engine);
+				DBUG_RETURN(true);
+			}
+		}
 	}
 
 	if (indexed_table->corrupted
@@ -3565,11 +3575,6 @@ ha_innobase::prepare_inplace_alter_table(
 		/* The clustered index is corrupted. */
 		my_error(ER_CHECK_NO_SUCH_TABLE, MYF(0));
 		DBUG_RETURN(true);
-	}
-
-	if (!(ha_alter_info->handler_flags & ~INNOBASE_INPLACE_IGNORE)) {
-		/* Nothing to do */
-		goto func_exit;
 	}
 
 	if (ha_alter_info->handler_flags

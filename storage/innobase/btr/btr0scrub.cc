@@ -578,7 +578,7 @@ btr_scrub_table_needs_scrubbing(
 		return false;
 	}
 
-	if (table->corrupted) {
+	if (!table->is_readable()) {
 		return false;
 	}
 

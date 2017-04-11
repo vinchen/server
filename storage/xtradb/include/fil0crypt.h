@@ -117,6 +117,7 @@ struct fil_space_crypt_t : st_encryption_scheme
 		min_key_version(new_min_key_version),
 		page0_offset(0),
 		encryption(new_encryption),
+		key_found(0),
 		rotate_state()
 	{
 		key_id = new_key_id;
@@ -295,7 +296,7 @@ fil_space_destroy_crypt_data(
 
 /******************************************************************
 Parse a MLOG_FILE_WRITE_CRYPT_DATA log entry
-@param[in,out]	ptr		Log entry start
+@param[in]	ptr		Log entry start
 @param[in]	end_ptr		Log entry end
 @param[in]	block		buffer block
 @param[out]	err		DB_SUCCESS or DB_DECRYPTION_FAILED

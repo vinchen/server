@@ -79,6 +79,17 @@ let $cleanup= drop table t1,t2,t3,t4;
 -- source include/start_mysqld.inc
 --source include/kill_mysqld.inc
 
+#
+# Now test with innodb-force-recovery=1 i.e. ignore corrupt pages
+#
+
+--echo # Restart mysqld --innodb-force-recovery=1
+-- let $restart_parameters=--innodb-force-recovery=1
+--error 1
+-- source include/start_mysqld.inc
+
+--source include/kill_mysqld.inc
+
 --echo # Restart mysqld --file-key-management-filename=keys2.txt
 -- let $restart_parameters=--file-key-management-filename=$MYSQL_TEST_DIR/std_data/keys2.txt
 -- source include/start_mysqld.inc

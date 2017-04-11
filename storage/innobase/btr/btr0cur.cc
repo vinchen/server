@@ -613,9 +613,11 @@ retry_page_get:
 		space, zip_size, page_no, rw_latch, guess, buf_mode,
 		file, line, mtr, &err);
 
-	/* Note that here we allow block == NULL and err == DB_SUCCESS
-	see below */
+	/* Note that block==NULL signifies either an error or change
+	buffering. */
+
 	if (err != DB_SUCCESS) {
+		ut_ad(block == NULL);
 		if (err == DB_DECRYPTION_FAILED) {
 			ib_push_warning((void *)NULL,
 				DB_DECRYPTION_FAILED,
@@ -1090,6 +1092,7 @@ btr_cur_open_at_rnd_pos_func(
 					index->table->name);
 				index->table->file_unreadable = true;
 			}
+
 			goto exit_loop;
 		}
 

@@ -2425,6 +2425,7 @@ err_exit:
 
 				table->file_unreadable = true;
 			}
+
 			if (filepath) {
 				mem_free(filepath);
 			}

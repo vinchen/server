@@ -418,17 +418,17 @@ buffer buf_pool if it is not already there. Sets the io_fix flag and sets
 an exclusive lock on the buffer frame. The flag is cleared and the x-lock
 released by the i/o-handler thread.
 
-@param[in]	space		space_id
+@param[in]	space_id	space_id
 @param[in]	zip_size	compressed page size in bytes, or 0
 @param[in]	offset		page number
 @return DB_SUCCESS if page has been read and is not corrupted,
-DB_PAGE_CORRUPTED if page based on checksum check is corrupted,
-DB_DECRYPTION_FAILED if page post encryption checksum matches but
+@retval DB_PAGE_CORRUPTED if page based on checksum check is corrupted,
+@retval DB_DECRYPTION_FAILED if page post encryption checksum matches but
 after decryption normal page checksum does not match.*/
 UNIV_INTERN
 dberr_t
 buf_read_page(
-	ulint	space,
+	ulint	space_id,
 	ulint	zip_size,
 	ulint	offset)
 {
@@ -436,27 +436,31 @@ buf_read_page(
 	ulint		count;
 	dberr_t		err = DB_SUCCESS;
 
-	tablespace_version = fil_space_get_version(space);
+	tablespace_version = fil_space_get_version(space_id);
 
-	/* We do the i/o in the synchronous aio mode to save thread
-	switches: hence TRUE */
+	FilSpace space(space_id, true);
 
-	count = buf_read_page_low(&err, true, BUF_READ_ANY_PAGE, space,
+	if (space()) {
+
+		/* We do the i/o in the synchronous aio mode to save thread
+		switches: hence TRUE */
+		count = buf_read_page_low(&err, true, BUF_READ_ANY_PAGE, space_id,
 				  zip_size, FALSE,
 				  tablespace_version, offset);
 
+		srv_stats.buf_pool_reads.add(count);
+	}
+
 	/* Page corruption and decryption failures are already reported
 	in above function. */
-
-	srv_stats.buf_pool_reads.add(count);
-
-	if (err == DB_TABLESPACE_DELETED) {
+	if (!space() || err == DB_TABLESPACE_DELETED) {
+		err = DB_TABLESPACE_DELETED;
 		ib_logf(IB_LOG_LEVEL_ERROR,
 			"Trying to access"
-			" tablespace " ULINTPF ":" ULINTPF
-			" but the tablespace does not exist"
+			" tablespace [space=" ULINTPF ": page=" ULINTPF
+			"] but the tablespace does not exist"
 			" or is just being dropped.",
-			space, offset);
+			space_id, offset);
 	}
 
 	/* Increment number of I/O operations used for LRU policy. */

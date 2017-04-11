@@ -779,6 +779,9 @@ struct dict_index_t{
 				to first_blob_page_no; protected by
 				blobs_mutex; @see btr_blob_dbg_t */
 #endif /* UNIV_BLOB_DEBUG */
+
+	bool is_readable() const;
+
 #ifdef UNIV_DEBUG
 	ulint		magic_n;/*!< magic number */
 /** Value of dict_index_t::magic_n */
@@ -1067,7 +1070,7 @@ struct dict_table_t{
 	unsigned	can_be_evicted:1;
 				/*!< TRUE if it's not an InnoDB system table
 				or a table that has no FK relationships */
-	unsigned	corrupted:1;
+	unsigned        corrupted:1;
 				/*!< TRUE if table is corrupted */
 	unsigned	drop_aborted:1;
 				/*!< TRUE if some indexes should be dropped
@@ -1351,12 +1354,32 @@ struct dict_table_t{
 				by lock_sys->mutex */
 #endif /* !UNIV_HOTBACKUP */
 
+	/* Returns true if this is a single-table tablespace
+	and the .ibd file is missing or page decryption failed
+	and/or page is corrupted.
+	@return true if table is readable
+	@retval false if table is not readable */
+	inline bool is_readable() const
+	{
+		return(UNIV_LIKELY(!file_unreadable));
+	}
+
 #ifdef UNIV_DEBUG
 	ulint		magic_n;/*!< magic number */
 /** Value of dict_table_t::magic_n */
 # define DICT_TABLE_MAGIC_N	76333786
 #endif /* UNIV_DEBUG */
 };
+
+/* Returns true if this is a single-table tablespace
+and the .ibd file is missing or page decryption failed
+and/or page is corrupted.
+@return true if table is readable
+@retval false if table is not readable */
+inline bool dict_index_t::is_readable() const
+{
+	return(UNIV_LIKELY(!table->file_unreadable));
+}
 
 /** A function object to add the foreign key constraint to the referenced set
 of the referenced table, if it exists in the dictionary cache. */

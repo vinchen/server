@@ -421,7 +421,7 @@ btr_pcur_move_to_next_page(
 
 	page = btr_pcur_get_page(cursor);
 
-	if (!page) {
+	if (UNIV_UNLIKELY(!page)) {
 		return;
 	}
 
@@ -435,7 +435,7 @@ btr_pcur_move_to_next_page(
 				   cursor->latch_mode,
 				   btr_pcur_get_btr_cur(cursor)->index, mtr);
 
-	if (!next_block) {
+	if (UNIV_UNLIKELY(!next_block)) {
 		return;
 	}
 

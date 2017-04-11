@@ -493,7 +493,9 @@ buf_dblwr_process()
 		page_no  = mach_read_from_4(page + FIL_PAGE_OFFSET);
 		space_id = mach_read_from_4(page + FIL_PAGE_SPACE_ID);
 
-		if (!fil_tablespace_exists_in_mem(space_id)) {
+		FilSpace space(space_id, true);
+
+		if (!space()) {
 			/* Maybe we have dropped the single-table tablespace
 			and this page once belonged to it: do nothing */
 			continue;
@@ -508,9 +510,7 @@ buf_dblwr_process()
 			continue;
 		}
 
-		fil_space_t* space = fil_space_acquire(space_id);
-		ut_ad(space);
-		ulint	zip_size = fsp_flags_get_zip_size(space->flags);
+		ulint	zip_size = fsp_flags_get_zip_size(space()->flags);
 		ut_ad(!buf_page_is_zeroes(page, zip_size));
 
 		/* Read in the actual page from the file */
@@ -546,10 +546,10 @@ buf_dblwr_process()
 			if (fil_space_verify_crypt_checksum(
 					read_buf, zip_size, NULL, page_no)
 			   || !buf_page_is_corrupted(
-				   true, read_buf, zip_size, space)) {
+				   true, read_buf, zip_size, space())) {
 				/* The page is good; there is no need
 				to consult the doublewrite buffer. */
-				goto release;
+				continue;
 			}
 
 			/* We intentionally skip this message for
@@ -582,7 +582,7 @@ buf_dblwr_process()
 			buffer. If not, we will report a fatal error
 			for a corrupted page somewhere else if that
 			page was truly needed. */
-			goto release;
+			continue;
 		}
 
 		if (page_no == 0) {
@@ -595,7 +595,7 @@ buf_dblwr_process()
 					"Ignoring a doublewrite copy of page "
 					ULINTPF ":0 due to invalid flags 0x%x",
 					space_id, int(flags));
-				goto release;
+				continue;
 			}
 			/* The flags on the page should be converted later. */
 		}
@@ -611,9 +611,6 @@ buf_dblwr_process()
 			"Recovered page " ULINTPF ":" ULINTPF " from"
 			" the doublewrite buffer.",
 			space_id, page_no);
-
-release:
-		fil_space_release(space);
 	}
 
 	ut_free(unaligned_read_buf);

@@ -1370,7 +1370,7 @@ row_insert_for_mysql(
 
 		return(DB_TABLESPACE_DELETED);
 
-	} else if (UNIV_UNLIKELY(prebuilt->table->file_unreadable)) {
+	} else if (!prebuilt->table->is_readable()) {
 		return (row_mysql_get_table_status(prebuilt->table, trx, true));
 	} else if (prebuilt->magic_n != ROW_PREBUILT_ALLOCATED) {
 		fprintf(stderr,
@@ -1757,7 +1757,7 @@ row_update_for_mysql(
 	ut_ad(trx != NULL);
 	UT_NOT_USED(mysql_rec);
 
-	if (UNIV_UNLIKELY(prebuilt->table->file_unreadable)) {
+	if (!table->is_readable()) {
 		return (row_mysql_get_table_status(table, trx, true));
 	}
 
@@ -3194,9 +3194,6 @@ row_discard_tablespace_for_mysql(
 
 	if (table == 0) {
 		err = DB_TABLE_NOT_FOUND;
-	} else if (table->file_unreadable &&
-		   fil_space_get(table->space) != NULL) {
-		err = DB_DECRYPTION_FAILED;
 	} else if (table->space == TRX_SYS_SPACE) {
 		char	table_name[MAX_FULL_NAME_LEN + 1];
 
@@ -3411,12 +3408,8 @@ row_truncate_table_for_mysql(
 
 	if (dict_table_is_discarded(table)) {
 		return(DB_TABLESPACE_DELETED);
-	} else if (table->file_unreadable) {
-		if (fil_space_get(table->space) == NULL) {
-			return(DB_TABLESPACE_NOT_FOUND);
-		} else {
-			return(DB_DECRYPTION_FAILED);
-		}
+	} else if (!table->is_readable()) {
+		return (row_mysql_get_table_status(table, trx, true));
 	}
 
 	trx_start_for_ddl(trx, TRX_DICT_OP_TABLE);
@@ -4000,20 +3993,6 @@ row_drop_table_for_mysql(
 		goto funct_exit;
 	}
 
-	/* If table is encrypted and table page encryption failed
-	return error. */
-	if (table->file_unreadable &&
-	    fil_space_get(table->space) != NULL) {
-
-		if (table->can_be_evicted) {
-			dict_table_move_from_lru_to_non_lru(table);
-		}
-
-		dict_table_close(table, TRUE, FALSE);
-		err = DB_DECRYPTION_FAILED;
-		goto funct_exit;
-	}
-
 	/* Turn on this drop bit before we could release the dictionary
 	latch */
 	table->to_be_dropped = true;
@@ -4396,7 +4375,8 @@ row_drop_table_for_mysql(
 		have a temp flag but not know the temp path */
 		ut_a(table->dir_path_of_temp_table == NULL || is_temp);
 		if (dict_table_is_discarded(table)
-		    || table->file_unreadable) {
+		    || (!table->is_readable()
+			&& fil_space_get(table->space) == NULL)) {
 			/* Do not attempt to drop known-to-be-missing
 			tablespaces. */
 			space_id = 0;
@@ -4807,7 +4787,9 @@ loop:
 					"'%s.frm' was lost.", table->name);
 			}
 
-			if (table->file_unreadable) {
+			if (!table->is_readable()
+			    && fil_space_get(table->space) == NULL) {
+
 				ib_logf(IB_LOG_LEVEL_WARN,
 					"Missing %s.ibd file for table %s.",
 					table->name, table->name);
@@ -5081,7 +5063,8 @@ row_rename_table_for_mysql(
 		      stderr);
 		goto funct_exit;
 
-	} else if (table->file_unreadable
+	} else if (!table->is_readable()
+		   && fil_space_get(table->space) == NULL
 		   && !dict_table_is_discarded(table)) {
 
 		err = DB_TABLE_NOT_FOUND;
@@ -5151,7 +5134,7 @@ row_rename_table_for_mysql(
 	which have space IDs > 0. */
 	if (err == DB_SUCCESS
 	    && table->space != TRX_SYS_SPACE
-	    && !table->file_unreadable) {
+	    && table->is_readable()) {
 		/* Make a new pathname to update SYS_DATAFILES. */
 		char*	new_path = row_make_new_pathname(table, new_name);
 

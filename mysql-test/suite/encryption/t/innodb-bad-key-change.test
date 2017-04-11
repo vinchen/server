@@ -114,16 +114,10 @@ SHOW WARNINGS;
 TRUNCATE TABLE t2;
 --replace_regex /tablespace [0-9]*/tablespace / /key_id [0-9]*/key_id /
 SHOW WARNINGS;
---error ER_GET_ERRMSG
+
 DROP TABLE t2;
---replace_regex /tablespace [0-9]*/tablespace / /key_id [0-9]*/key_id /
-SHOW WARNINGS;
 
 --echo
---echo # Restart server with keys3.txt
--- let $restart_parameters=--file-key-management-filename=$MYSQL_TEST_DIR/std_data/keys3.txt
+--echo # Start server with keys2.txt
+-- let $restart_parameters=--file-key-management-filename=$MYSQL_TEST_DIR/std_data/keys2.txt
 -- source include/restart_mysqld.inc
-
-DROP TABLE t2;
---replace_regex /tablespace [0-9]*/tablespace /
-SHOW WARNINGS;

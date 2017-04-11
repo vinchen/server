@@ -1,6 +1,7 @@
 /*****************************************************************************
 
 Copyright (c) 2009, 2016, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 2015, 2017, MariaDB Corporation.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -922,8 +923,7 @@ dict_stats_update_transient_for_index(
 
 		/* Do not continue if table decryption has failed or
 		table is already marked as corrupted. */
-		if (!index->table->file_unreadable &&
-		    !index->table->corrupted) {
+		if (index->is_readable()) {
 			btr_estimate_number_of_different_key_vals(index);
 		}
 	}
@@ -981,8 +981,7 @@ dict_stats_update_transient(
 
 		/* Do not continue if table decryption has failed or
 		table is already marked as corrupted. */
-		if (index->table->file_unreadable ||
-		    index->table->corrupted) {
+		if (!index->is_readable()) {
 			break;
 		}
 
@@ -3199,15 +3198,27 @@ dict_stats_update(
 
 	ut_ad(!mutex_own(&dict_sys->mutex));
 
-	if (table->file_unreadable) {
-		ut_print_timestamp(stderr);
-		fprintf(stderr,
-			" InnoDB: cannot calculate statistics for table %s "
-			"because the .ibd file is missing. For help, please "
-			"refer to " REFMAN "innodb-troubleshooting.html\n",
-			ut_format_name(table->name, TRUE, buf, sizeof(buf)));
-		dict_stats_empty_table(table, true);
-		return(DB_TABLESPACE_DELETED);
+	if (!table->is_readable()) {
+		char		buf[MAX_FULL_NAME_LEN];
+		ut_format_name(table->name, TRUE, buf, sizeof(buf));
+
+		FilSpace space(table->space, true);
+
+		if (space()) {
+			ib_logf(IB_LOG_LEVEL_INFO,
+				"Cannot calculate statistics because "
+				"table %s can't be decrypted.",
+				buf);
+			return (DB_DECRYPTION_FAILED);
+		} else {
+			ib_logf(IB_LOG_LEVEL_INFO,
+				" Cannot calculate statistics for table %s "
+				"because the .ibd file is missing. For help, please "
+				"refer to " REFMAN "innodb-troubleshooting.html.",
+				buf);
+			dict_stats_empty_table(table, true);
+			return(DB_TABLESPACE_DELETED);
+		}
 	} else if (srv_force_recovery >= SRV_FORCE_NO_IBUF_MERGE) {
 		/* If we have set a high innodb_force_recovery level, do
 		not calculate statistics, as a badly corrupted index can
@@ -3953,19 +3964,49 @@ dict_stats_save_defrag_stats(
 {
 	dberr_t	ret;
 
-	if (index->table->file_unreadable) {
-		ut_print_timestamp(stderr);
-		fprintf(stderr,
-			" InnoDB: Cannot save defragment stats because "
-			".ibd file is missing.\n");
-		return (DB_TABLESPACE_DELETED);
-	}
-	if (dict_index_is_corrupted(index)) {
-		ut_print_timestamp(stderr);
-		fprintf(stderr,
-			" InnoDB: Cannot save defragment stats because "
-			"index is corrupted.\n");
+
+	if (index->is_readable()) {
+
+	} else if (index->table->corrupted) {
+		char		buf[3 * NAME_LEN];
+		char		buf2[3 * NAME_LEN];
+
+		innobase_format_name(buf, sizeof buf,
+				index->name,
+				false);
+
+		innobase_format_name(buf2, sizeof buf2,
+				index->table->name,
+				true);
+
+		ib_logf(IB_LOG_LEVEL_INFO,
+			"Cannot save defragment statistics for "
+			"index %s in table %s because table is corrupted.",
+			buf, buf2);
+
 		return(DB_CORRUPTION);
+	} else {
+		char		buf[3 * NAME_LEN];
+
+		innobase_format_name(buf, sizeof buf,
+				index->table->name,
+				true);
+
+		FilSpace space(index->table->space);
+
+		if (space()) {
+			ib_logf(IB_LOG_LEVEL_INFO,
+				"Cannot save deframent statistics because "
+				" table %s can't be decrypted.",
+				buf);
+			return (DB_DECRYPTION_FAILED);
+		} else {
+			ib_logf(IB_LOG_LEVEL_INFO,
+				"Cannot save defragment statistics for "
+				" table %s  because .ibd file is missing.",
+				buf);
+			return (DB_TABLESPACE_DELETED);
+		}
 	}
 
 	if (dict_index_is_univ(index)) {
