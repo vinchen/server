@@ -424,7 +424,8 @@ released by the i/o-handler thread.
 @return DB_SUCCESS if page has been read and is not corrupted,
 @retval DB_PAGE_CORRUPTED if page based on checksum check is corrupted,
 @retval DB_DECRYPTION_FAILED if page post encryption checksum matches but
-after decryption normal page checksum does not match.*/
+after decryption normal page checksum does not match.
+@retval DB_TABLESPACE_DELETE if tablespace .ibd file is missing */
 UNIV_INTERN
 dberr_t
 buf_read_page(

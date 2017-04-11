@@ -477,7 +477,7 @@ released by the i/o-handler thread.
 @retval DB_PAGE_CORRUPTED if page based on checksum check is corrupted,
 @retval DB_DECRYPTION_FAILED if page post encryption checksum matches but
 after decryption normal page checksum does not match.
-@retval DB_TABLESPACE_DELETED if tablespace is missing */
+@retval DB_TABLESPACE_DELETE if tablespace .ibd file is missing */
 UNIV_INTERN
 dberr_t
 buf_read_page(
