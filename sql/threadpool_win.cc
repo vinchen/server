@@ -52,9 +52,20 @@
     (GetProcAddress(GetModuleHandle("kernel32"),#function))
 
 
+#if _MSC_VER >= 1600
+/* Stack size manipulation available only on Win7+ /declarations in VS10 */
 WEAK_SYMBOL(BOOL, SetThreadpoolStackInformation, PTP_POOL, 
   PTP_POOL_STACK_INFORMATION);
 #define SetThreadpoolStackInformation my_SetThreadpoolStackInformation
+#else /* _MSC_VER < 1600 */
+#define SetThreadpoolCallbackPriority(env,prio)
+typedef enum _TP_CALLBACK_PRIORITY {
+  TP_CALLBACK_PRIORITY_HIGH,
+  TP_CALLBACK_PRIORITY_NORMAL,
+  TP_CALLBACK_PRIORITY_LOW,
+  TP_CALLBACK_PRIORITY_INVALID
+} TP_CALLBACK_PRIORITY;
+#endif
 
 /* Log a warning */
 static void tp_log_warning(const char *msg, const char *fct)
@@ -487,6 +498,7 @@ int TP_pool_win::init()
   /*
     Control stack size (OS must be Win7 or later)
   */
+#if _MSC_VER >=1600
   if (SetThreadpoolStackInformation)
   {
     TP_POOL_STACK_INFORMATION stackinfo;
@@ -498,6 +510,7 @@ int TP_pool_win::init()
         "SetThreadpoolStackInformation");
     }
   }
+#endif
   return 0;
 }
 

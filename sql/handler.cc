@@ -3403,9 +3403,11 @@ void handler::print_error(int error, myf errflag)
     break;
   case ENOENT:
   case ENOTDIR:
+#if _MSC_VER >=1600
   case ELOOP:
     textno=ER_FILE_NOT_FOUND;
     break;
+#endif
   case ENOSPC:
   case HA_ERR_DISK_FULL:
     textno= ER_DISK_FULL;
