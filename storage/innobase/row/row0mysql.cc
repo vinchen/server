@@ -4025,6 +4025,9 @@ row_drop_table_for_mysql(
 		sql +=	"DELETE FROM SYS_VIRTUAL\n"
 			"WHERE TABLE_ID = table_id;\n";
 
+		sql +=	"DELETE FROM SYS_COLUMNS_ADDED\n"
+			"WHERE TABLE_ID = table_id;\n";
+
 		sql += "END;\n";
 
 		err = que_eval_sql(info, sql.c_str(), FALSE, trx);

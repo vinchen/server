@@ -301,6 +301,9 @@ for unknown bits in order to protect backward incompatibility. */
 /* @{ */
 /** Total number of bits in table->flags2. */
 #define DICT_TF2_BITS			9
+/* The higher two bytes of SYS_TABLES.MIX_LEN is used by 
+instant add columns */
+#define DICT_TF2_MAX_BITS 16
 #define DICT_TF2_UNUSED_BIT_MASK	(~0U << DICT_TF2_BITS | \
 					 1U << DICT_TF_POS_SHARED_SPACE)
 #define DICT_TF2_BIT_MASK		~DICT_TF2_UNUSED_BIT_MASK
@@ -368,6 +371,9 @@ dict_mem_table_create(
 	ulint		n_cols,		/*!< in: total number of columns
 					including virtual and non-virtual
 					columns */
+	ulint		n_cols_core, /*!< in: total number of columns before 
+				first time instant add column. 
+				If zero, means non-instant */
 	ulint		n_v_cols,	/*!< in: number of virtual columns */
 	ulint		flags,		/*!< in: table flags */
 	ulint		flags2);	/*!< in: table flags2 */
@@ -624,6 +630,13 @@ struct table_name_t
 	char*	m_name;
 };
 
+/** Data structure for a column added default value */
+struct dict_col_def_t {
+	dict_col_t*		col;
+	byte*			def_val;
+	unsigned		def_val_len;
+};
+
 /** Data structure for a column in a table */
 struct dict_col_t{
 	/*----------------------*/
@@ -667,6 +680,8 @@ struct dict_col_t{
 	unsigned	max_prefix:12;	/*!< maximum index prefix length on
 					this column. Our current max limit is
 					3072 for Barracuda table */
+
+	dict_col_def_t*		def_val;/*!< default value of added columns */
 };
 
 /** Index information put in a list of virtual column structure. Index
@@ -899,6 +914,10 @@ struct dict_index_t{
 	unsigned	n_def:10;/*!< number of fields defined so far */
 	unsigned	n_fields:10;/*!< number of fields in the index */
 	unsigned	n_nullable:10;/*!< number of nullable fields */
+	unsigned	n_core_fields:10;/*!< number of fields in the index
+				(before the first time of instant add columns) */
+	unsigned	n_core_nullable:10;/*!< number of nullable fields 
+				(before the first time of instant add columns) */
 	unsigned	cached:1;/*!< TRUE if the index object is in the
 				dictionary cache */
 	unsigned	to_be_dropped:1;
@@ -1435,6 +1454,10 @@ struct dict_table_t {
 
 	/** Number of non-virtual columns. */
 	unsigned				n_cols:10;
+
+	/** Number of non-virtual columns before the first time instant add columns. 
+	If n_cols_core < n_cols, means dict_table_is_instant return TRUE */
+	unsigned				n_core_cols:10;
 
 	/** Number of total columns (inlcude virtual and non-virtual) */
 	unsigned				n_t_cols:10;

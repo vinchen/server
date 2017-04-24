@@ -4583,7 +4583,7 @@ prepare_inplace_alter_table_dict(
 		/* The initial space id 0 may be overridden later if this
 		table is going to be a file_per_table tablespace. */
 		ctx->new_table = dict_mem_table_create(
-			new_table_name, space_id, n_cols + n_v_cols, n_v_cols,
+			new_table_name, space_id, n_cols + n_v_cols, 0, n_v_cols,
 			flags, flags2);
 
 		/* The rebuilt indexed_table will use the renamed

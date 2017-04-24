@@ -193,6 +193,19 @@ dict_col_set_mbminmaxlen(
 	ulint		mbmaxlen)	/*!< in: minimum multi-byte
 					character size, in bytes */
 	MY_ATTRIBUTE((nonnull));
+
+
+/*********************************************************************//**
+Sets default value of added columns  */
+UNIV_INLINE
+void
+dict_col_set_added_column_default(
+	dict_col_t*		col,
+	const	byte*		def_val,
+	ulint					def_val_len,
+	mem_heap_t*		heap )
+	MY_ATTRIBUTE((nonnull));
+
 /*********************************************************************//**
 Gets the column data type. */
 UNIV_INLINE
@@ -742,6 +755,16 @@ dict_index_is_clust(
 	const dict_index_t*	index)	/*!< in: index */
 	MY_ATTRIBUTE((warn_unused_result));
 
+/********************************************************************//**
+Check whether the index is the clustered index of instant table.
+@return nonzero for clustered index of instant table, zero for other indexes */
+UNIV_INLINE
+ulint
+dict_index_is_clust_instant(
+/*================*/
+	const dict_index_t*	index)	/*!< in: index */
+	MY_ATTRIBUTE((warn_unused_result));
+
 /** Check if index is auto-generated clustered index.
 @param[in]	index	index
 
@@ -954,6 +977,16 @@ Check whether the table uses the compact page format.
 UNIV_INLINE
 ibool
 dict_table_is_comp(
+/*===============*/
+	const dict_table_t*	table)	/*!< in: table */
+	MY_ATTRIBUTE((nonnull, warn_unused_result));
+
+/********************************************************************//**
+Check whether the table has been instant added columns.
+@return TRUE if table has been instant added columns */
+UNIV_INLINE
+ibool
+dict_table_is_instant(
 /*===============*/
 	const dict_table_t*	table)	/*!< in: table */
 	MY_ATTRIBUTE((nonnull, warn_unused_result));
@@ -1180,6 +1213,16 @@ dict_index_get_n_fields(
 					representation of index (in
 					the dictionary cache) */
 	MY_ATTRIBUTE((nonnull, warn_unused_result));
+/********************************************************************//**
+@return	 nullable count of n_core_fields */
+UNIV_INLINE
+ulint 
+dict_index_get_n_core_nullable(
+/*================*/
+    const dict_index_t*     index,  
+    ulint                   n_core_fields )
+	MY_ATTRIBUTE((nonnull, warn_unused_result));
+
 /********************************************************************//**
 Gets the number of fields in the internal representation of an index
 that uniquely determine the position of an index entry in the index, if
@@ -2001,6 +2044,14 @@ bool
 dict_col_is_virtual(
 	const dict_col_t*	col);
 
+/*********************************************************************//**
+Gets the column is nullable.
+@return	TRUE if nullable */
+UNIV_INLINE
+ibool
+dict_col_is_nullable(
+	const dict_col_t*	col);	/*!< in: column */
+
 /** encode number of columns and number of virtual columns in one
 4 bytes value. We could do this because the number of columns in
 InnoDB is limited to 1017
@@ -2023,6 +2074,29 @@ dict_table_decode_n_col(
 	ulint	encoded,
 	ulint*	n_col,
 	ulint*	n_v_col);
+
+/** encode flags2 and number of core columns in one
+4 bytes value. We could do this because the number of columns in
+InnoDB is limited to 1017
+@param[in]  flags2	
+@param[in]	n_cols_core column number before first time instant add column	
+@return encoded value */
+UNIV_INLINE
+ulint
+dict_table_encode_mix_len(
+	ulint	flags2,
+	ulint	n_cols_core);
+
+/** Decode number of flags2 and number of core columns in one 4 bytes value.
+@param[in]	encoded	encoded value
+@param[in,out]	flags2 
+@param[in,out]	n_cols_core column number before first time instant add column*/
+UNIV_INLINE
+void
+dict_table_decode_mix_len(
+	ulint	encoded,
+	ulint*	flags2,
+	ulint*	n_cols_core);
 
 /** Look for any dictionary objects that are found in the given tablespace.
 @param[in]	space_id	Tablespace ID to search for.
