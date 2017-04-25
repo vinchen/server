@@ -234,6 +234,26 @@ rec_get_n_extern_new(
 	return(n_extern);
 }
 
+/*******************************************************************//**
+Get the bit number of nullable bitmap. */
+UNIV_INTERN
+ulint
+rec_get_n_nullable(
+/*=======================*/
+	const rec_t*		rec,	/*!< in: gcs_record */
+	const dict_index_t*	index)	/*!< in: clustered index */
+{
+	ulint           field_count = 0;
+	ulint           field_count_len = 0;
+    
+	ut_ad(rec_is_instant(rec) && dict_index_is_clust_instant(index));
+
+	field_count = rec_get_field_count(rec, &field_count_len);
+	ut_ad(field_count_len == rec_get_feild_count_len(field_count));
+
+	return dict_index_get_first_n_field_n_nullable(index, field_count);
+}
+
 /******************************************************//**
 Determine the offset to each field in a leaf-page record
 in ROW_FORMAT=COMPACT.  This is a special case of
@@ -254,12 +274,41 @@ rec_init_offsets_comp_ordinary(
 	ulint		i		= 0;
 	ulint		offs		= 0;
 	ulint		any_ext		= 0;
-	ulint		n_null		= index->n_nullable;
-	const byte*	nulls		= temp
-		? rec - 1
-		: rec - (1 + REC_N_NEW_EXTRA_BYTES);
-	const byte*	lens		= nulls - UT_BITS_IN_BYTES(n_null);
+	ulint		any_def		= 0;
+	const byte*	nulls		= NULL;
+	const byte*	lens		= NULL;
+	ulint		field_count = ULINT_UNDEFINED;      /* Init as a big value */
+	ulint		n_null = ULINT_UNDEFINED;
 	ulint		null_mask	= 1;
+	ulint		extra_bytes = temp ? 0 : REC_N_NEW_EXTRA_BYTES;	
+
+	if (rec_is_instant(rec)) {
+		ulint field_count_len;
+		ut_ad(dict_index_is_clust_instant(index));
+
+		field_count = rec_get_field_count(rec, &field_count_len);
+
+		ut_a(extra_bytes == REC_N_NEW_EXTRA_BYTES);
+		nulls = (byte*) rec - (1 + extra_bytes + field_count_len);
+
+		n_null = rec_get_n_nullable(rec, index);
+		lens	= nulls - UT_BITS_IN_BYTES(n_null);
+
+	} else if (dict_index_is_clust_instant(index)) {
+		n_null = index->n_core_nullable;
+		field_count = index->n_core_fields;
+
+		lens = nulls - UT_BITS_IN_BYTES(n_null);
+
+		nulls		= rec - (1 + extra_bytes);
+
+	} else {
+		n_null = index->n_nullable;
+
+		nulls		= rec - (1 + extra_bytes);
+
+		lens = nulls - UT_BITS_IN_BYTES(n_null);
+	}
 
 #ifdef UNIV_DEBUG
 	/* We cannot invoke rec_offs_make_valid() here if temp=true.
@@ -284,6 +333,22 @@ rec_init_offsets_comp_ordinary(
 		const dict_col_t*	col
 			= dict_field_get_col(field);
 		ulint			len;
+
+		/*  */
+		if (i >= field_count) {
+			ulint def_len;
+
+			ut_ad(rec_is_instant(rec) || dict_index_is_clust_instant(index));
+			if (!dict_index_get_nth_col_def(index, i, &def_len)) {
+				len = offs | REC_OFFS_SQL_NULL;	
+				ut_ad(def_len == UNIV_SQL_NULL);
+			} else {
+				len = offs | REC_OFFS_DEFAULT;
+				any_def = REC_OFFS_DEFAULT;
+			}
+
+			goto resolved;
+		}
 
 		if (!(col->prtype & DATA_NOT_NULL)) {
 			/* nullable field => read the null flag */
@@ -349,7 +414,7 @@ resolved:
 	} while (++i < rec_offs_n_fields(offsets));
 
 	*rec_offs_base(offsets)
-		= (rec - (lens + 1)) | REC_OFFS_COMPACT | any_ext;
+		= (rec - (lens + 1)) | REC_OFFS_COMPACT | any_ext | any_def;
 }
 
 /******************************************************//**
@@ -407,8 +472,19 @@ rec_init_offsets(
 			return;
 		}
 
+		/** The n_nullable flags in the clustered index node pointer 
+			records in ROW_FORMAT=COMPACT or ROW_FORMAT=DYNAMIC must 
+			reflect the number of 'core columns'. These flags are 
+			useless garbage, and they are only reserved because of 
+			file format compatibility. 
+			(Clustered index node pointer records only contain the 
+			PRIMARY KEY columns, which are always NOT NULL, 
+			so we should have used n_nullable=0.)
+		*/
+		ut_ad(!rec_is_instant(rec));
+
 		nulls = rec - (REC_N_NEW_EXTRA_BYTES + 1);
-		lens = nulls - UT_BITS_IN_BYTES(index->n_nullable);
+		lens = nulls - UT_BITS_IN_BYTES(index->n_core_nullable);
 		offs = 0;
 		null_mask = 1;
 

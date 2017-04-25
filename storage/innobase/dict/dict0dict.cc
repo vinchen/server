@@ -2619,7 +2619,7 @@ dict_index_add_to_cache_w_vcol(
 
 		new_index->n_core_fields = new_index->n_fields - 
 						(new_index->table->n_cols - new_index->table->n_core_cols);
-		new_index->n_core_nullable = dict_index_get_n_core_nullable(new_index, new_index->n_core_fields);
+		new_index->n_core_nullable = dict_index_get_first_n_field_n_nullable(new_index, new_index->n_core_fields);
 	} else {
 		new_index->n_core_nullable = new_index->n_nullable;
 		new_index->n_core_fields = new_index->n_fields;

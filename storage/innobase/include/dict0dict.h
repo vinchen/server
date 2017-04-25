@@ -1217,10 +1217,10 @@ dict_index_get_n_fields(
 @return	 nullable count of n_core_fields */
 UNIV_INLINE
 ulint 
-dict_index_get_n_core_nullable(
+dict_index_get_first_n_field_n_nullable(
 /*================*/
     const dict_index_t*     index,  
-    ulint                   n_core_fields )
+    ulint                   first_n_fields )
 	MY_ATTRIBUTE((nonnull, warn_unused_result));
 
 /********************************************************************//**
@@ -1323,6 +1323,25 @@ dict_index_get_nth_col_pos(
 	ulint			n,	/*!< in: column number */
 	ulint*			prefix_col_pos) /*!< out: col num if prefix */
 	MY_ATTRIBUTE((nonnull(1), warn_unused_result));
+
+/********************************************************************//**
+@return	default value and get length*/
+UNIV_INLINE
+const byte*
+dict_index_get_nth_col_def(
+/*===================*/
+	const dict_index_t*	index,	/*!< in: index */
+	ulint			pos,	/*!< in: position of the field */
+	ulint*    len );  /*!< out: length of default value */
+
+UNIV_INLINE
+const byte*
+dict_index_get_nth_col_def_with_heap(
+/*===================*/
+	const dict_index_t*	index,	/*!< in: index */
+	ulint						pos,	/*!< in: position of the field */
+	mem_heap_t*     heap, /*!< in: alloc memory from heap, can be NULL */
+	ulint*					len); /*!< out: length of default value */
 
 /** Looks for column n in an index.
 @param[in]	index		index

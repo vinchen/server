@@ -44,6 +44,8 @@ B-tree page that is the leftmost page on its level
 /* The deleted flag in info bits */
 #define REC_INFO_DELETED_FLAG	0x20UL	/* when bit is set to 1, it means the
 					record has been delete marked */
+#define REC_INFO_ADDED_FLAG   	0x80UL  /* when bit is set to 1, it means the
+					record has been instant added columns */
 
 /* Number of extra bytes in an old-style record,
 in addition to the data and the offsets */
@@ -593,6 +595,16 @@ rec_offs_any_null_extern(
 	const ulint*	offsets)	/*!< in: rec_get_offsets(rec) */
 	MY_ATTRIBUTE((warn_unused_result));
 /******************************************************//**
+Determine if the offsets are for a record containing
+default value for instant added columns.
+@return nonzero if externally stored */
+UNIV_INLINE
+ulint
+rec_offs_any_default(
+/*================*/
+	const ulint*	offsets)/*!< in: array returned by rec_get_offsets() */
+	MY_ATTRIBUTE((warn_unused_result));
+/******************************************************//**
 Returns nonzero if the extern bit is set in nth field of rec.
 @return nonzero if externally stored */
 UNIV_INLINE
@@ -990,6 +1002,61 @@ rec_print(
 	const rec_t*	rec,
 	ulint		info,
 	const ulint*	offsets);
+
+/******************************************************//**
+Returns nonzero if the default bit is set in nth field of rec.
+@return	nonzero if default bit is set */
+UNIV_INLINE
+ulint
+rec_offs_nth_default(
+/*================*/
+	const ulint*	offsets,/*!< in: array returned by rec_get_offsets() */
+	ulint		n);	/*!< in: nth field */
+	
+/******************************************************//**
+set instant flag */
+UNIV_INLINE
+void
+rec_set_instant_flag(
+/*=====================*/
+	rec_t*		rec,	/*!< in/out: new-style physical record */
+	ulint		flag);	/*!< in: nonzero if instant marked */
+
+/******************************************************//**
+@return	TRUE if instant record type */
+UNIV_INLINE
+ibool
+rec_is_instant(
+/*=====================*/
+	const rec_t*	rec);	/*!< in: new-style physical record */
+
+/**********************************************************//**
+Returns length of field count input 
+@return	size */
+UNIV_INLINE
+ulint rec_get_feild_count_len (
+/*==========*/
+	ulint	field_count );		/*!< in: field count*/
+
+/**********************************************************//**
+Returns field count of instant record
+@return	size */
+UNIV_INLINE
+ulint
+rec_get_field_count(
+/*==========*/
+	const rec_t*    rec,                /*!< in: the record ptr */
+	ulint*	        field_count_len);   /*!< out: occupy size of field count */
+    
+/**********************************************************//**
+Set field count of instant record
+@return	the occupy size of field count */
+UNIV_INLINE
+ulint
+rec_set_field_count(
+/*==========*/
+	rec_t*          rec,                /*!< in: the record ptr */
+	const ulint     n_fields);          /*!< in: field count of instant record */
 
 /** Wrapper for pretty-printing a record */
 struct rec_index_print
