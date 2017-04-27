@@ -1262,7 +1262,7 @@ dict_sys_tables_rec_read(
 		/* Ignore the garbage for tables created with 
 		old versions of InnoDB that only implemented
 		ROW_FORMAT=REDUNDANT */
-		*flags = mix_len;
+		*flags2 = mix_len;
 		*n_cols_core = 0;
 	} else {
 		dict_table_decode_mix_len(mix_len, flags2, n_cols_core);
@@ -1879,7 +1879,8 @@ dict_load_columns_added (
 	btr_pcur_open_on_user_rec(sys_index, tuple, PAGE_CUR_GE,
 				  BTR_SEARCH_LEAF, &pcur, &mtr);
 
-	for (i = table->n_core_cols; i < table->n_cols; )
+	for (i = table->n_core_cols - dict_table_get_n_sys_cols(table); 
+				i < table->n_cols - dict_table_get_n_sys_cols(table); )
 	{
 		const char*	err_msg;
 		table_id_t	table_id;

@@ -4674,10 +4674,10 @@ btr_index_rec_validate(
 		}
 
 		if ((field->prefix_len == 0
-		     && len != UNIV_SQL_NULL && fixed_size
+		     && len != UNIV_SQL_NULL && len != UNIV_SQL_DEFAULT && fixed_size
 		     && len != fixed_size)
 		    || (field->prefix_len > 0
-			&& len != UNIV_SQL_NULL
+			&& len != UNIV_SQL_NULL && len != UNIV_SQL_DEFAULT
 			&& len
 			> field->prefix_len)) {
 

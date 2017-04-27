@@ -135,7 +135,10 @@ dict_mem_table_create(
 			dict_table_get_n_sys_cols(table));
 	table->n_v_cols = (unsigned int) (n_v_cols);
 	table->n_cols = table->n_t_cols - table->n_v_cols;
-	table->n_core_cols = n_cols_core ? n_cols_core : table->n_cols;
+	ut_ad(n_cols_core <= n_cols);
+	table->n_core_cols = n_cols_core ? 
+			(n_cols_core + dict_table_get_n_sys_cols(table)) : 
+			table->n_cols;
 
 	table->cols = static_cast<dict_col_t*>(
 		mem_heap_alloc(heap, table->n_cols * sizeof(dict_col_t)));

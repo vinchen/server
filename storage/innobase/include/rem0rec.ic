@@ -1668,7 +1668,7 @@ rec_get_field_count(
 Returns length of field count input 
 @return	size */
 UNIV_INLINE
-ulint rec_get_feild_count_len (
+ulint rec_get_field_count_len (
 /*==========*/
 	ulint	field_count )		/*!< in: field count*/
 {

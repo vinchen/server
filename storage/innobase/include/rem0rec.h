@@ -60,6 +60,11 @@ in addition to the data and the offsets */
 #define REC_STATUS_INFIMUM	2
 #define REC_STATUS_SUPREMUM	3
 
+/* REC_FLAG for instant add columns */
+#define REC_FLAG_NONE           0x00
+#define REC_FLAG_INSTANT        0x01
+#define REC_FLAG_NODE_PTR       0x02
+
 /* The following four constants are needed in page0zip.cc in order to
 efficiently compress and decompress pages. */
 
@@ -1034,7 +1039,7 @@ rec_is_instant(
 Returns length of field count input 
 @return	size */
 UNIV_INLINE
-ulint rec_get_feild_count_len (
+ulint rec_get_field_count_len (
 /*==========*/
 	ulint	field_count );		/*!< in: field count*/
 

@@ -411,6 +411,8 @@ cmp_data(
 	const byte*	data2,
 	ulint		len2)
 {
+	ut_ad(len1 != UNIV_SQL_DEFAULT && len2 != UNIV_SQL_DEFAULT);
+
 	if (len1 == UNIV_SQL_NULL || len2 == UNIV_SQL_NULL) {
 		if (len1 == len2) {
 			return(0);
@@ -834,6 +836,7 @@ cmp_dtuple_rec_with_match_bytes(
 		rec_b_ptr = rec_get_nth_field(rec, offsets,
 					      cur_field, &rec_f_len);
 		ut_ad(!rec_offs_nth_extern(offsets, cur_field));
+		ut_ad(!rec_offs_nth_default(offsets, cur_field));
 
 		/* If we have matched yet 0 bytes, it may be that one or
 		both the fields are SQL null, or the record or dtuple may be
