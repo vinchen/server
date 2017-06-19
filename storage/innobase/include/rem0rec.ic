@@ -1692,7 +1692,7 @@ rec_set_field_count(
 {
     byte*            ptr;
 
-    ut_ad(rec_is_instant(rec));
+    //ut_ad(rec_is_instant(rec));
     ut_ad(n_fields < REC_MAX_N_FIELDS);
     
     if (n_fields <= REC_FIELD_COUNT_ONE_BYTE_MAX) {

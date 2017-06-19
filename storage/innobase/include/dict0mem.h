@@ -393,6 +393,15 @@ dict_mem_table_free(
 	dict_table_t*	table);		/*!< in: table */
 /**********************************************************************//**
 Adds a column definition to a table. */
+
+/* fake col default for recovery */
+void
+dict_mem_table_fake_col_default(
+	dict_table_t*           table, /*!< in: table */
+	dict_col_t*             col,	/*!< in: col*/
+	mem_heap_t*             heap	/*!< in: mem_heap for default value */
+);
+
 void
 dict_mem_table_add_col(
 /*===================*/

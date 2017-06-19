@@ -1371,7 +1371,10 @@ rec_convert_dtuple_to_rec_comp(
 				ut_ad(n_fields == dict_index_get_n_fields(index));
 
 				/* Set instant record */
-				rec_set_instant_flag(rec, TRUE);
+				/* The instant flag should be set in rec_convert_dtuple_to_rec_new
+				Because here the memory is non-initialized */
+				//rec_set_instant_flag(rec, TRUE);
+
 				field_count_len = rec_set_field_count(rec, n_fields);
 
 				nulls = rec - (REC_N_NEW_EXTRA_BYTES + field_count_len + 1);
