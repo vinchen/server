@@ -298,10 +298,9 @@ rec_init_offsets_comp_ordinary(
 		n_null = index->n_core_nullable;
 		field_count = index->n_core_fields;
 
-		lens = nulls - UT_BITS_IN_BYTES(n_null);
-
 		nulls		= rec - (1 + extra_bytes);
 
+		lens = nulls - UT_BITS_IN_BYTES(n_null);
 	} else {
 		n_null = index->n_nullable;
 
@@ -799,6 +798,37 @@ resolved:
 	*rec_offs_base(offsets) = (lens - extra + REC_N_NEW_EXTRA_BYTES)
 		| REC_OFFS_COMPACT | any_ext;
 }
+
+const byte*
+rec_get_nth_field(
+	const rec_t*	rec,
+	const ulint*	offsets,	/*!< in: array returned by rec_get_offsets() */
+	ulint			n,			/*!< in: index of the field */
+	const dict_index_t*	index,	/*!< in: dict_index of rec. 
+									If NULL, *len maybe UNIV_SQL_DEFAULT */
+	mem_heap_t*		heap,   	/*!< in: mem_heap for default value of instant added columns
+									IF NULL, return the dictionary memory directly.
+									It must be read only when heap = NULL. */
+	ulint*			len) 		/*!< out: length of the field; UNIV_SQL_NULL if SQL null */
+{
+	const byte*		field;
+	ulint off = rec_get_nth_field_offs(offsets, n, len);
+
+	ut_a(index || !rec_offs_nth_default(offsets, n));
+
+	if (*len != UNIV_SQL_DEFAULT || !index) {
+		return rec + off;
+	}
+
+	ut_a(index);
+
+	/* If heap = NULL, return the dictionary memory directly. */
+	field = dict_index_get_nth_col_def_with_heap(index, n, heap, len);
+	ut_ad(*len != UNIV_SQL_DEFAULT);
+
+	return field;
+}
+
 
 /************************************************************//**
 The following function is used to get the offset to the nth
@@ -1341,7 +1371,7 @@ rec_convert_dtuple_to_rec_comp(
 				ut_ad(n_fields == dict_index_get_n_fields(index));
 
 				/* Set instant record */
-				rec_set_instant_flag(rec, 1);
+				rec_set_instant_flag(rec, TRUE);
 				field_count_len = rec_set_field_count(rec, n_fields);
 
 				nulls = rec - (REC_N_NEW_EXTRA_BYTES + field_count_len + 1);
@@ -1555,10 +1585,13 @@ rec_convert_dtuple_to_rec_new(
 		// INSTANT RECORD
 
 		/* Set the info bits of the record */
-		rec_set_info_and_status_bits(rec, dtuple_get_info_bits(dtuple) | REC_INFO_ADDED_FLAG);
+		rec_set_info_and_status_bits(rec, dtuple_get_info_bits(dtuple));
+
+		rec_set_instant_flag(rec, TRUE);
 	} else {
 		/* Set the info bits of the record */
 		rec_set_info_and_status_bits(rec, dtuple_get_info_bits(dtuple));
+		rec_set_instant_flag(rec, FALSE);
 	}
 
 	return(rec);
@@ -1699,7 +1732,7 @@ rec_copy_prefix_to_dtuple(
 		ulint		len;
 
 		field = dtuple_get_nth_field(tuple, i);
-		data = rec_get_nth_field(rec, offsets, i, &len);
+		data = rec_get_nth_field(rec, offsets, i, index, NULL, &len);
 
 		if (len != UNIV_SQL_NULL) {
 			dfield_set_data(field,
@@ -2068,7 +2101,11 @@ rec_print_comp(
 		const byte*	data;
 		ulint		len;
 
-		data = rec_get_nth_field(rec, offsets, i, &len);
+		if (rec_offs_nth_default(offsets, i)) {
+			len = UNIV_SQL_DEFAULT;
+		} else {
+			data = rec_get_nth_field_inside(rec, offsets, i, &len);
+		}
 
 		fprintf(file, " %lu:", (ulong) i);
 
@@ -2196,7 +2233,11 @@ rec_print_mbr_rec(
 		const byte*	data;
 		ulint		len;
 
-		data = rec_get_nth_field(rec, offsets, i, &len);
+		if (rec_offs_nth_default(offsets, i)) {
+			len = UNIV_SQL_DEFAULT;
+		} else {
+			data = rec_get_nth_field_inside(rec, offsets, i, &len);
+		}
 
 		if (i == 0) {
 			fprintf(file, " MBR:");
@@ -2214,7 +2255,11 @@ rec_print_mbr_rec(
 		} else {
 			fprintf(file, " %lu:", (ulong) i);
 
-			if (len != UNIV_SQL_NULL) {
+			if (len == UNIV_SQL_NULL) {
+				fputs(" SQL NULL", file);
+			} else if (len == UNIV_SQL_DEFAULT) {
+				fputs(" SQL DEFAULT", file);
+			} else {
 				if (len <= 30) {
 
 					ut_print_buf(file, data, len);
@@ -2224,8 +2269,6 @@ rec_print_mbr_rec(
 					fprintf(file, " (total %lu bytes)",
 						(ulong) len);
 				}
-			} else {
-				fputs(" SQL NULL", file);
 			}
 		}
 		putc(';', file);
@@ -2336,12 +2379,17 @@ rec_print(
 			o << ',';
 		}
 
-		data = rec_get_nth_field(rec, offsets, i, &len);
+		if (rec_offs_nth_default(offsets, i)) {
+			o << "DEFAULT";
+			continue;
+		}
+
+		data = rec_get_nth_field_inside(rec, offsets, i, &len);
 
 		if (len == UNIV_SQL_NULL) {
 			o << "NULL";
 			continue;
-		}
+		} 
 
 		if (rec_offs_nth_extern(offsets, i)) {
 			ulint	local_len = len - BTR_EXTERN_FIELD_REF_SIZE;
@@ -2422,7 +2470,7 @@ rec_get_trx_id(
 
 	offsets = rec_get_offsets(rec, index, offsets, trx_id_col + 1, &heap);
 
-	trx_id = rec_get_nth_field(rec, offsets, trx_id_col, &len);
+	trx_id = rec_get_nth_field_inside(rec, offsets, trx_id_col, &len);
 
 	ut_ad(len == DATA_TRX_ID_LEN);
 
@@ -2487,7 +2535,8 @@ wsrep_rec_get_foreign_key(
 			dict_index_get_nth_field(index_ref, i);
 		const dict_col_t* col_r = dict_field_get_col(field_r);
 
-		data = rec_get_nth_field(rec, offsets, i, &len);
+		ut_ad(!rec_offs_nth_default(offsets, i));
+		data = rec_get_nth_field_inside(rec, offsets, i, &len);
 		if (key_len + ((len != UNIV_SQL_NULL) ? len + 1 : 1) > 
 		    *buf_len) {
 			fprintf (stderr, 

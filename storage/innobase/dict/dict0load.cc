@@ -177,7 +177,8 @@ dict_load_column_added_low(
 	dict_index_t*	sys_index,
 	table_id_t*		table_id_out,
 	ulint*			pos_out,
-	char**			def_val_out);
+	char**			def_val_out,
+	ulint*			def_val_len_out);
 
 /** Load an index field definition from a SYS_FIELDS record to dict_index_t.
 @return	error message
@@ -550,13 +551,14 @@ dict_process_sys_columns_added_rec(
 	dict_index_t*	index,
 	table_id_t*	table_id,
 	ulint*			pos,
-	char**			def_val)
+	char**			def_val,
+	ulint*			def_val_len)
 {
 	const char*	err_msg;
 
 	/* Parse the record, and get "dict_col_def_t" struct filled */
 	err_msg = dict_load_column_added_low(NULL, heap, rec, index, 
-					table_id, pos, def_val);
+					table_id, pos, def_val, def_val_len);
 
 	return(err_msg);
 }
@@ -1736,7 +1738,8 @@ dict_load_column_added_low(
 	dict_index_t*   sys_index,
 	table_id_t*		table_id_out,
 	ulint*			pos_out,
-	char**			def_val_out)
+	char**			def_val_out,
+	ulint*			def_val_len_out)
 {
 	const byte*		field;
 	const byte*		def_val = NULL;
@@ -1817,13 +1820,16 @@ err_len:
 	if (table) {
 		dict_col_t* col = dict_table_get_nth_col(table, pos);
 
-		dict_col_set_added_column_default(col, def_val, def_val_len, heap);
+		dict_col_set_added_column_default(col, def_val, def_val_len, table->heap);
 	}
 	
 	*table_id_out = table_id;
 	*pos_out = pos;
-	if(def_val_out) {
-		*def_val_out = (char*)mem_heap_strdupl(heap, (char*)def_val, def_val_len);
+	if(def_val_out && def_val_len_out) {
+		*def_val_out = def_val ? 
+							(char*)mem_heap_strdupl(heap, (char*)def_val, def_val_len) : 
+							(char*)def_val;
+		*def_val_len_out = def_val_len;
 	}
 	return(NULL);
 }
@@ -1868,29 +1874,53 @@ dict_load_columns_added (
 	mach_write_to_8(buf, table->id);
 	dfield_set_data(dfield, buf, 8);
 
+	//int j = 0;
+	//for (i = 0; i < table->n_t_cols - dict_table_get_n_sys_cols(table); i++) {
+	//	dict_col_t* col = dict_table_get_nth_col(table, i);
+
+	//	if (!dict_col_is_virtual(col)) 
+	//		j++;
+
+	//	// find the first added column pos
+	//	if (j == table->n_core_cols - dict_table_get_n_sys_cols(table)) {
+	//		break;
+	//	}
+	//}
+	//ulint first_added_pos = i + 1;
+	ulint first_added_pos = table->n_core_cols - dict_table_get_n_sys_cols(table);
+
 	/* POS */
 	dfield = dtuple_get_nth_field(tuple, 1);
 	buf = static_cast<byte*>(mem_heap_alloc(heap, 4));
-	mach_write_to_4(buf, table->n_core_cols);  
+	// first instant add columns
+	mach_write_to_4(buf, first_added_pos);  
 	dfield_set_data(dfield, buf, 4);
+
 
 	dict_index_copy_types(tuple, sys_index, 2);
 
 	btr_pcur_open_on_user_rec(sys_index, tuple, PAGE_CUR_GE,
 				  BTR_SEARCH_LEAF, &pcur, &mtr);
 
-	for (i = table->n_core_cols - dict_table_get_n_sys_cols(table); 
+	for (i = first_added_pos; 
 				i < table->n_cols - dict_table_get_n_sys_cols(table); )
 	{
 		const char*	err_msg;
 		table_id_t	table_id;
 		ulint				pos;
 
-		ut_a(btr_pcur_is_on_user_rec(&pcur));
+		dict_col_t* col = dict_table_get_nth_col(table, i);
 
+		//// skip virtual columns
+		//if (dict_col_is_virtual(col)) {
+		//	i++;
+		//	continue;
+		//}
+
+		ut_a(btr_pcur_is_on_user_rec(&pcur));
 		rec = btr_pcur_get_rec(&pcur);
 
-		err_msg = dict_load_column_added_low(table, heap, rec, sys_index, &table_id, &pos, NULL);
+		err_msg = dict_load_column_added_low(table, heap, rec, sys_index, &table_id, &pos, NULL, NULL);
 
 		if (!err_msg) {
 			if (table_id != table->id) {

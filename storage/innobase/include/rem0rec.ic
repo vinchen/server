@@ -598,7 +598,7 @@ bool
 rec_info_bits_valid(
 	ulint	bits)
 {
-	return(0 == (bits & ~(REC_INFO_DELETED_FLAG | REC_INFO_MIN_REC_FLAG)));
+	return(0 == (bits & ~(REC_INFO_DELETED_FLAG | REC_INFO_MIN_REC_FLAG | REC_INFO_ADDED_FLAG)));
 }
 #endif /* UNIV_DEBUG */
 
@@ -1164,7 +1164,7 @@ rec_offs_any_null_extern(
 		if (rec_offs_nth_extern(offsets, i)) {
 			ulint		len;
 			const byte*	field
-				= rec_get_nth_field(rec, offsets, i, &len);
+				= rec_get_nth_field_inside(rec, offsets, i, &len);
 
 			ut_a(len >= BTR_EXTERN_FIELD_REF_SIZE);
 			if (!memcmp(field + len
@@ -1191,7 +1191,6 @@ rec_offs_nth_extern(
 {
 	ut_ad(rec_offs_validate(NULL, NULL, offsets));
 	ut_ad(n < rec_offs_n_fields(offsets));
-	ut_ad(!rec_offs_nth_default(offsets, n));
 	return(rec_offs_base(offsets)[1 + n] & REC_OFFS_EXTERNAL);
 }
 
@@ -1237,8 +1236,9 @@ rec_offs_nth_sql_null(
 {
 	ut_ad(rec_offs_validate(NULL, NULL, offsets));
 	ut_ad(n < rec_offs_n_fields(offsets));
-	ut_ad(!rec_offs_nth_default(offsets, n));
-	return(rec_offs_base(offsets)[1 + n] & REC_OFFS_SQL_NULL);
+	ulint ret = (rec_offs_base(offsets)[1 + n] & REC_OFFS_SQL_NULL);
+	ut_ad(!ret || !rec_offs_nth_default(offsets, n));
+	return ret;
 }
 
 /******************************************************//**
@@ -1486,13 +1486,13 @@ rec_set_nth_field(
 		return;
 	}
 
-	data2 = rec_get_nth_field(rec, offsets, n, &len2);
+	ut_ad(!rec_offs_nth_default(offsets, n));
+	data2 = (byte*)rec_get_nth_field_inside(rec, offsets, n, &len2);
 	if (len2 == UNIV_SQL_NULL) {
 		ut_ad(!rec_offs_comp(offsets));
 		rec_set_nth_field_null_bit(rec, n, FALSE);
 		ut_ad(len == rec_get_nth_field_size(rec, n));
 	} else {
-		ut_ad(len != UNIV_SQL_DEFAULT);
 		ut_ad(len2 == len);
 	}
 
@@ -1877,7 +1877,7 @@ rec_get_converted_size(
 @param[in]	offsets		return value of rec_get_offsets()
 @param[in]	n_fields	number of complete fields to fold
 @param[in]	n_bytes		number of bytes to fold in the last field
-@param[in]	index_id	index tree ID
+@param[in]	index		index 
 @return the folded value */
 UNIV_INLINE
 ulint
@@ -1886,13 +1886,14 @@ rec_fold(
 	const ulint*	offsets,
 	ulint		n_fields,
 	ulint		n_bytes,
-	index_id_t	tree_id)
+	const dict_index_t*	index)
 {
 	ulint		i;
 	const byte*	data;
 	ulint		len;
 	ulint		fold;
 	ulint		n_fields_rec;
+	index_id_t	tree_id = index->id;
 
 	ut_ad(rec_offs_validate(rec, NULL, offsets));
 	ut_ad(rec_validate(rec, offsets));
@@ -1913,7 +1914,7 @@ rec_fold(
 	fold = ut_fold_ull(tree_id);
 
 	for (i = 0; i < n_fields; i++) {
-		data = rec_get_nth_field(rec, offsets, i, &len);
+		data = rec_get_nth_field(rec, offsets, i, index, NULL, &len);
 
 		if (len != UNIV_SQL_NULL) {
 			fold = ut_fold_ulint_pair(fold,
@@ -1922,7 +1923,7 @@ rec_fold(
 	}
 
 	if (n_bytes > 0) {
-		data = rec_get_nth_field(rec, offsets, i, &len);
+		data = rec_get_nth_field(rec, offsets, i, index, NULL, &len);
 
 		if (len != UNIV_SQL_NULL) {
 			if (len > n_bytes) {

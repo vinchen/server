@@ -567,7 +567,26 @@ rec_get_nth_field_offs(
 	ulint*		len)	/*!< out: length of the field; UNIV_SQL_NULL
 				if SQL null */
 	MY_ATTRIBUTE((nonnull));
-#define rec_get_nth_field(rec, offsets, n, len) \
+
+const byte*
+rec_get_nth_field(
+	const rec_t*		rec,
+	const ulint*		offsets,/*!< in: array returned by rec_get_offsets() */
+	ulint				n,		/*!< in: index of the field */
+	const dict_index_t*	index,	/*!< in: dict_index of rec */
+	mem_heap_t*			heap,   /*!< in: mem_heap for default 
+									value of instant added columns */
+	ulint*				len) 	/*!< out: length of the field; UNIV_SQL_NULL 
+									if SQL null */
+	MY_ATTRIBUTE((nonnull));
+
+/* 	Never return DEFAULT value(UNIV_SQL_DEFAULT) 
+	It always return pointer inside the record
+*/
+#define rec_get_nth_field_inside(rec, offsets, n, len) \
+(byte*)rec_get_nth_field(rec, offsets, n, NULL, NULL, len)
+
+#define rec_get_nth_field1(rec, offsets, n, len) \
 ((rec) + rec_get_nth_field_offs(offsets, n, len))
 /******************************************************//**
 Determine if the offsets are for a record in the new
@@ -872,7 +891,7 @@ rec_fold(
 	const ulint*	offsets,
 	ulint		n_fields,
 	ulint		n_bytes,
-	index_id_t	tree_id)
+	const dict_index_t*	index)
 	MY_ATTRIBUTE((warn_unused_result));
 /*********************************************************//**
 Builds a physical record out of a data tuple and

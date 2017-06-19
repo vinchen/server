@@ -576,7 +576,7 @@ cmp_dtuple_rec_with_gis(
 	dtuple_field = dtuple_get_nth_field(dtuple, 0);
 	dtuple_f_len = dfield_get_len(dtuple_field);
 
-	rec_b_ptr = rec_get_nth_field(rec, offsets, 0, &rec_f_len);
+	rec_b_ptr = rec_get_nth_field_inside(rec, offsets, 0, &rec_f_len);
 	ret = cmp_gis_field(
 		mode, static_cast<const byte*>(dfield_get_data(dtuple_field)),
 		(unsigned) dtuple_f_len, rec_b_ptr, (unsigned) rec_f_len);
@@ -608,7 +608,7 @@ cmp_dtuple_rec_with_gis_internal(
 	dtuple_field = dtuple_get_nth_field(dtuple, 0);
 	dtuple_f_len = dfield_get_len(dtuple_field);
 
-	rec_b_ptr = rec_get_nth_field(rec, offsets, 0, &rec_f_len);
+	rec_b_ptr = rec_get_nth_field_inside(rec, offsets, 0, &rec_f_len);
 	ret = cmp_gis_field(
 		PAGE_CUR_WITHIN,
 		static_cast<const byte*>(dfield_get_data(dtuple_field)),
@@ -619,7 +619,7 @@ cmp_dtuple_rec_with_gis_internal(
 
 	dtuple_field = dtuple_get_nth_field(dtuple, 1);
 	dtuple_f_len = dfield_get_len(dtuple_field);
-	rec_b_ptr = rec_get_nth_field(rec, offsets, 1, &rec_f_len);
+	rec_b_ptr = rec_get_nth_field_inside(rec, offsets, 1, &rec_f_len);
 
 	return(cmp_data(dtuple_field->type.mtype,
 			dtuple_field->type.prtype,
@@ -717,8 +717,11 @@ cmp_dtuple_rec_with_match_low(
 		contain externally stored fields, and the first fields
 		(primary key fields) should already differ. */
 		ut_ad(!rec_offs_nth_extern(offsets, cur_field));
+		
+		/* We should never compare against instant add columns */
+		ut_ad(!rec_offs_nth_default(offsets, cur_field));
 
-		rec_b_ptr = rec_get_nth_field(rec, offsets, cur_field,
+		rec_b_ptr = rec_get_nth_field_inside(rec, offsets, cur_field,
 					      &rec_f_len);
 
 		ut_ad(!dfield_is_ext(dtuple_field));
@@ -833,10 +836,11 @@ cmp_dtuple_rec_with_match_bytes(
 
 		dtuple_b_ptr = static_cast<const byte*>(
 			dfield_get_data(dfield));
-		rec_b_ptr = rec_get_nth_field(rec, offsets,
+
+		ut_ad(!rec_offs_nth_default(offsets, cur_field));
+		rec_b_ptr = rec_get_nth_field_inside(rec, offsets,
 					      cur_field, &rec_f_len);
 		ut_ad(!rec_offs_nth_extern(offsets, cur_field));
-		ut_ad(!rec_offs_nth_default(offsets, cur_field));
 
 		/* If we have matched yet 0 bytes, it may be that one or
 		both the fields are SQL null, or the record or dtuple may be
@@ -1020,8 +1024,8 @@ cmp_rec_rec_simple_field(
 	ut_ad(!rec_offs_nth_extern(offsets1, n));
 	ut_ad(!rec_offs_nth_extern(offsets2, n));
 
-	rec1_b_ptr = rec_get_nth_field(rec1, offsets1, n, &rec1_f_len);
-	rec2_b_ptr = rec_get_nth_field(rec2, offsets2, n, &rec2_f_len);
+	rec1_b_ptr = rec_get_nth_field(rec1, offsets1, n, index, NULL, &rec1_f_len);
+	rec2_b_ptr = rec_get_nth_field(rec2, offsets2, n, index, NULL, &rec2_f_len);
 
 	return(cmp_data(col->mtype, col->prtype,
 			rec1_b_ptr, rec1_f_len, rec2_b_ptr, rec2_f_len));
@@ -1210,9 +1214,9 @@ cmp_rec_rec_with_match(
 		ut_ad(!rec_offs_nth_extern(offsets2, cur_field));
 
 		rec1_b_ptr = rec_get_nth_field(rec1, offsets1,
-					       cur_field, &rec1_f_len);
+					       cur_field, index, NULL, &rec1_f_len);
 		rec2_b_ptr = rec_get_nth_field(rec2, offsets2,
-					       cur_field, &rec2_f_len);
+					       cur_field, index, NULL, &rec2_f_len);
 
 		if (nulls_unequal
 		    && rec1_f_len == UNIV_SQL_NULL

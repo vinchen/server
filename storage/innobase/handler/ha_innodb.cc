@@ -18193,6 +18193,18 @@ ha_innobase::check_if_incompatible_data(
 	return(COMPATIBLE_DATA_YES);
 }
 
+bool ha_innobase::check_instant_alter(const Alter_inplace_info* inplace_info)
+{
+	if (inplace_info->handler_flags == Alter_inplace_info::ADD_STORED_BASE_COLUMN 
+		|| inplace_info->handler_flags == Alter_inplace_info::ADD_INSTANT_COLUMN) {
+			dict_table_t* table = this->m_prebuilt->table;
+			if (table && dict_table_is_comp(table) && !DICT_TF_GET_ZIP_SSIZE(table->flags)) {
+				return true;
+			}
+	}
+	return false;
+}
+
 /****************************************************************//**
 Update the system variable innodb_io_capacity_max using the "saved"
 value. This function is registered as a callback with MySQL. */

@@ -278,6 +278,32 @@ field_store_string(
 }
 
 /*******************************************************************//**
+Auxiliary function to store char* value in MYSQL_TYPE_BLOB field.
+@return 0 on success */
+int
+field_store_blob(
+/*===============*/
+	Field*		field,	/*!< in/out: target field for storage */
+	const char*	str,	/*!< in: blob string, or NULL */
+	ulint		str_len)/*!< in: length of blob string */
+{
+	int	ret;
+
+	if (str != NULL) {
+
+		ret = field->store(str, str_len, 
+				   field->charset());
+		field->set_notnull();
+	} else {
+
+		ret = 0; /* success */
+		field->set_null();
+	}
+
+	return(ret);
+}
+
+/*******************************************************************//**
 Store the name of an index in a MYSQL_TYPE_VARCHAR field.
 Handles the names of incomplete secondary indexes.
 @return 0 on success */
@@ -9635,7 +9661,7 @@ static ST_FIELD_INFO	innodb_sys_columns_added_fields_info[] =
 #define SYS_COLUMNS_ADDED_DEFAULT_VALUE		2
 	{STRUCT_FLD(field_name,		"DEFAULT_VALUE"),
 	 STRUCT_FLD(field_length,	65535),
-	 STRUCT_FLD(field_type,		MYSQL_TYPE_STRING),
+	 STRUCT_FLD(field_type,		MYSQL_TYPE_BLOB),
 	 STRUCT_FLD(value,		0),
 	 STRUCT_FLD(field_flags,	MY_I_S_MAYBE_NULL),
 	 STRUCT_FLD(old_name,		""),
@@ -9659,6 +9685,7 @@ i_s_dict_fill_sys_columns_added(
 	table_id_t	table_id,
 	ulint				pos,
 	const char*	def_val,	
+	ulint				def_val_len,
 	TABLE*			table_to_fill)
 {
 	Field**		fields;
@@ -9671,7 +9698,8 @@ i_s_dict_fill_sys_columns_added(
 
 	OK(fields[SYS_COLUMNS_ADDED_POS]->store(pos));
 
-	OK(field_store_string(fields[SYS_COLUMNS_ADDED_DEFAULT_VALUE], def_val));
+	//OK(field_store_string(fields[SYS_COLUMNS_ADDED_DEFAULT_VALUE], def_val));
+	OK(field_store_blob(fields[SYS_COLUMNS_ADDED_DEFAULT_VALUE], def_val, def_val_len));
 
 	OK(schema_table_store_record(thd, table_to_fill));
 
@@ -9715,19 +9743,20 @@ i_s_sys_columns_added_fill_table(
 		const char*	err_msg;
 		table_id_t	table_id;
 		char*				def_val;
+		ulint				def_val_len = 0;
 		
 
 		/* populate a dict_col_t structure with information from
 		a SYS_COLUMNS_ADDED row */
 		err_msg = dict_process_sys_columns_added_rec(heap, rec, pcur.index(),
 						       &table_id, &pos,
-						       &def_val);
+						       &def_val, &def_val_len);
 
 		mtr_commit(&mtr);
 		mutex_exit(&dict_sys->mutex);
 
 		if (!err_msg) {
-			i_s_dict_fill_sys_columns_added(thd, table_id, pos, def_val,
+			i_s_dict_fill_sys_columns_added(thd, table_id, pos, def_val, def_val_len,
 						  tables->table);
 		} else {
 			push_warning_printf(thd, Sql_condition::WARN_LEVEL_WARN,

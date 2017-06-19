@@ -3339,8 +3339,11 @@ fts_fetch_doc_from_rec(
 					static_cast<mem_heap_t*>(
 						doc->self_heap->arg));
 		} else {
+			ut_ad(rec_offs_validate(clust_rec, clust_index, offsets));
+
 			doc->text.f_str = (byte*) rec_get_nth_field(
-				clust_rec, offsets, clust_pos,
+				clust_rec, offsets, clust_pos, clust_index,
+				static_cast<mem_heap_t*>(doc->self_heap->arg),
 				&doc->text.f_len);
 		}
 
@@ -3650,7 +3653,7 @@ fts_get_max_doc_id(
 		offsets = rec_get_offsets(
 			rec, index, offsets, ULINT_UNDEFINED, &heap);
 
-		data = rec_get_nth_field(rec, offsets, 0, &len);
+		data = rec_get_nth_field_inside(rec, offsets, 0, &len);
 
 		doc_id = static_cast<doc_id_t>(fts_read_doc_id(
 			static_cast<const byte*>(data)));
@@ -5226,7 +5229,7 @@ fts_get_doc_id_from_rec(
 
 	ut_ad(col_no != ULINT_UNDEFINED);
 
-	data = rec_get_nth_field(rec, offsets, col_no, &len);
+	data = rec_get_nth_field_inside(rec, offsets, col_no, &len);
 
 	ut_a(len == 8);
 	ut_ad(8 == sizeof(doc_id));

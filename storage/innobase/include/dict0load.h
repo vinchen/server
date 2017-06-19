@@ -268,7 +268,8 @@ dict_process_sys_columns_added_rec(
 	dict_index_t*	index,
 	table_id_t*		table_id,
 	ulint*			pos,
-	char**			def_val);
+	char**			def_val,
+	ulint*			def_val_len);
 /********************************************************************//**
 This function parses a SYS_FIELDS record and populate a dict_field_t
 structure with the information from the record.
