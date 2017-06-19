@@ -4195,7 +4195,13 @@ innobase_add_one_instant(
 	ulint	field_type;
 	ulint	charset_no;
 	dberr_t error;
-	mem_heap_t*		heap = NULL;
+	mem_heap_t*	heap = NULL;
+	dict_col_t	tmp_col;
+	ulint 		prtype;
+	pars_info_t*    info;
+	byte*		def_val = NULL;
+	ulint		def_val_len = 0;
+
 
 	ulint	col_type
 		= get_innobase_type_from_mysql_type(
@@ -4254,9 +4260,9 @@ innobase_add_one_instant(
 	}
 
 
-	ulint prtype = dtype_form_prtype(field_type, charset_no);
+	prtype	= dtype_form_prtype(field_type, charset_no);
 
-	pars_info_t*    info = pars_info_create();
+	info = pars_info_create();
 
 	pars_info_add_ull_literal(info, "id", table->id);
 	pars_info_add_int4_literal(info, "pos", pos_in_innodb);
@@ -4279,15 +4285,11 @@ innobase_add_one_instant(
 		goto err_exit;
 	}
 
-	dict_col_t	tmp_col;
 	memset((byte*)&tmp_col, 0, sizeof(dict_col_t));
 	dict_mem_fill_column_struct(&tmp_col, pos_in_innodb, col_type, prtype, col_len);
 
 	heap = mem_heap_create(1024);
-	byte*					def_val = NULL;
-	ulint					def_val_len = 0;
-
-
+	
 	// Note: field->field_index is not always equal to pos(because of virtual columns)
 	error = innobase_get_field_def_value(altered_table, &tmp_col, field->field_index, dict_table_is_comp(table), heap, &def_val, &def_val_len);
 	if (error != DB_SUCCESS) {

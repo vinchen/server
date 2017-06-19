@@ -1795,7 +1795,7 @@ err_len:
 		ut_a(rec);
 		rec_offs_init(offsets_);
 
-		rec_get_offsets(rec,sys_index,offsets,ULINT_UNDEFINED,&heap);
+		offsets = rec_get_offsets(rec,sys_index,offsets,ULINT_UNDEFINED,&heap);
 
 		def_val = btr_rec_copy_externally_stored_field(
 				rec, offsets, 
@@ -1849,7 +1849,6 @@ dict_load_columns_added (
 	byte*		buf;
 	ulint		i;
 	mtr_t		mtr;
-	ulint		n_skipped = 0;
 
 	if (!dict_table_is_instant(table))
 		return;
@@ -1888,6 +1887,7 @@ dict_load_columns_added (
 	//}
 	//ulint first_added_pos = i + 1;
 	ulint first_added_pos = table->n_core_cols - dict_table_get_n_sys_cols(table);
+	ulint last_added_pos = table->n_cols - dict_table_get_n_sys_cols(table);
 
 	/* POS */
 	dfield = dtuple_get_nth_field(tuple, 1);
@@ -1903,13 +1903,13 @@ dict_load_columns_added (
 				  BTR_SEARCH_LEAF, &pcur, &mtr);
 
 	for (i = first_added_pos; 
-				i < table->n_cols - dict_table_get_n_sys_cols(table); )
+				i < last_added_pos; )
 	{
 		const char*	err_msg;
 		table_id_t	table_id;
 		ulint				pos;
 
-		dict_col_t* col = dict_table_get_nth_col(table, i);
+		//dict_col_t* col = dict_table_get_nth_col(table, i);
 
 		//// skip virtual columns
 		//if (dict_col_is_virtual(col)) {

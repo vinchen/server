@@ -576,9 +576,8 @@ rec_get_nth_field(
 	const dict_index_t*	index,	/*!< in: dict_index of rec */
 	mem_heap_t*			heap,   /*!< in: mem_heap for default 
 									value of instant added columns */
-	ulint*				len) 	/*!< out: length of the field; UNIV_SQL_NULL 
+	ulint*				len); 	/*!< out: length of the field; UNIV_SQL_NULL 
 									if SQL null */
-	MY_ATTRIBUTE((nonnull));
 
 /* 	Never return DEFAULT value(UNIV_SQL_DEFAULT) 
 	It always return pointer inside the record

@@ -654,8 +654,8 @@ row_upd_rec_in_place(
 		ulint is_instant = rec_is_instant(rec);
 
 		ut_ad(!is_instant || 
-				dict_index_is_clust_instant(index) && 
-				rec_get_field_count(rec, NULL) <= dict_index_get_n_fields(index));
+				(dict_index_is_clust_instant(index) && 
+				rec_get_field_count(rec, NULL) <= dict_index_get_n_fields(index)));
 
 		rec_set_info_bits_new(rec, update->info_bits);
 
