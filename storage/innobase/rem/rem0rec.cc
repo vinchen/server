@@ -282,7 +282,8 @@ rec_init_offsets_comp_ordinary(
 	ulint		null_mask	= 1;
 	ulint		extra_bytes = temp ? 0 : REC_N_NEW_EXTRA_BYTES;	
 
-	if (rec_is_instant(rec)) {
+	// for zip table/fts, the info bit of rec maybe Non-initialized
+	if (!temp && !dict_table_is_zip(index->table) && rec_is_instant(rec)) {
 		ulint field_count_len;
 		ut_ad(dict_index_is_clust_instant(index));
 

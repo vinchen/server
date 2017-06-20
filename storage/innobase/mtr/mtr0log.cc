@@ -561,22 +561,20 @@ mlog_parse_index(
 			return(NULL);
 		}
 		n = mach_read_from_2(ptr);
+		ptr += 2;
 		if (n & 0x8000) {
 			is_instant = TRUE;
 			n &= 0x7FFF;
 
-			if (is_instant) {
-				n_core_fields = mach_read_from_2(ptr);
-				ut_ad(n_core_fields <= n && n_core_fields > 0);
-				ptr += 2;
+			n_core_fields = mach_read_from_2(ptr);
+			ptr += 2;
+			ut_ad(n_core_fields <= n && n_core_fields > 0);
 
-				if (end_ptr < ptr + 2) {
-					return(NULL);
-				}
+			if (end_ptr < ptr + 2) {
+				return(NULL);
 			}
 		}
 
-		ptr += 2;
 		n_uniq = mach_read_from_2(ptr);
 		ptr += 2;
 		ut_ad(n_uniq <= n);

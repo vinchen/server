@@ -992,6 +992,16 @@ dict_table_is_instant(
 	MY_ATTRIBUTE((nonnull, warn_unused_result));
 
 /********************************************************************//**
+Check whether the table use compressed row format.
+@return TRUE if table use compressed row format */
+UNIV_INLINE
+ibool
+dict_table_is_zip(
+/*===============*/
+	const dict_table_t*	table)	/*!< in: table */
+	MY_ATTRIBUTE((nonnull, warn_unused_result));
+
+/********************************************************************//**
 Determine the file format of a table.
 @return file format version */
 UNIV_INLINE

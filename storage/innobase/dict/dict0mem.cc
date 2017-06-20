@@ -279,7 +279,6 @@ dict_mem_table_fake_col_default(
 	ulint       fixed_size = 0;
 	ulint       def_val_len = 0;
 
-	ut_ad(!dict_col_is_nullable(col));
 	ut_ad(dict_table_is_instant(table));
 
 	fixed_size = dict_col_get_fixed_size(col, dict_table_is_comp(table));
