@@ -479,7 +479,6 @@ void Item_bool_rowready_func2::fix_length_and_dec()
 int Arg_comparator::set_cmp_func(Item_func_or_sum *owner_arg,
                                  Item **a1, Item **a2)
 {
-  THD *thd= current_thd;
   owner= owner_arg;
   set_null= set_null && owner_arg;
   a= a1;
@@ -488,7 +487,7 @@ int Arg_comparator::set_cmp_func(Item_func_or_sum *owner_arg,
   Type_handler_hybrid_field_type tmp;
   if (tmp.aggregate_for_comparison(owner_arg->func_name(), tmp_args, 2, false))
   {
-    DBUG_ASSERT(thd->is_error());
+    DBUG_ASSERT(current_thd->is_error());
     return 1;
   }
   m_compare_handler= tmp.type_handler();
@@ -552,20 +551,20 @@ bool Arg_comparator::set_cmp_func_string()
 }
 
 
-bool Arg_comparator::set_cmp_func_temporal()
+bool Arg_comparator::set_cmp_func_time()
 {
-  enum_field_types f_type= a[0]->field_type_for_temporal_comparison(b[0]);
   m_compare_collation= &my_charset_numeric;
-  if (f_type == MYSQL_TYPE_TIME)
-  {
-    func= is_owner_equal_func() ? &Arg_comparator::compare_e_time :
-                                  &Arg_comparator::compare_time;
-  }
-  else
-  {
-    func= is_owner_equal_func() ? &Arg_comparator::compare_e_datetime :
-                                  &Arg_comparator::compare_datetime;
-  }
+  func= is_owner_equal_func() ? &Arg_comparator::compare_e_time :
+                                &Arg_comparator::compare_time;
+  return false;
+}
+
+
+bool Arg_comparator::set_cmp_func_datetime()
+{
+  m_compare_collation= &my_charset_numeric;
+  func= is_owner_equal_func() ? &Arg_comparator::compare_e_datetime :
+                                &Arg_comparator::compare_datetime;
   return false;
 }
 
@@ -735,8 +734,8 @@ get_datetime_value(THD *thd, Item ***item_arg, Item **cache_arg,
   {
     if (!thd)
       thd= current_thd;
-
-    Item_cache_temporal *cache= new (thd->mem_root) Item_cache_temporal(thd, f_type);
+    const Type_handler *h= Type_handler::get_handler_by_field_type(f_type);
+    Item_cache_temporal *cache= new (thd->mem_root) Item_cache_temporal(thd, h);
     cache->store_packed(value, item);
     *cache_arg= cache;
     *item_arg= cache_arg;
@@ -2032,7 +2031,6 @@ void Item_func_between::fix_after_pullout(st_select_lex *new_parent, Item **ref)
 
 void Item_func_between::fix_length_and_dec()
 {
-  THD *thd= current_thd;
   max_length= 1;
 
   /*
@@ -2044,14 +2042,16 @@ void Item_func_between::fix_length_and_dec()
   if (m_comparator.aggregate_for_comparison(Item_func_between::func_name(),
                                             args, 3, true))
   {
-    DBUG_ASSERT(thd->is_error());
+    DBUG_ASSERT(current_thd->is_error());
     return;
   }
 
-  if (m_comparator.cmp_type() == STRING_RESULT &&
-      agg_arg_charsets_for_comparison(cmp_collation, args, 3))
-   return;
+  m_comparator.type_handler()->Item_func_between_fix_length_and_dec(this);
+}
 
+
+bool Item_func_between::fix_length_and_dec_numeric(THD *thd)
+{
   /* See the comment about the similar block in Item_bool_func2 */
   if (args[0]->real_item()->type() == FIELD_ITEM &&
       !thd->lex->is_ps_or_view_context_analysis())
@@ -2069,6 +2069,7 @@ void Item_func_between::fix_length_and_dec()
       }
     }
   }
+  return false;
 }
 
 
@@ -2080,7 +2081,7 @@ longlong Item_func_between::val_int_cmp_temporal()
   bool value_is_null, a_is_null, b_is_null;
 
   ptr= &args[0];
-  enum_field_types f_type= m_comparator.field_type();
+  enum_field_types f_type= m_comparator.type_handler()->field_type();
   value= get_datetime_value(thd, &ptr, &cache, f_type, &value_is_null);
   if (ptr != &args[0])
     thd->change_item_tree(&args[0], *ptr);
@@ -2214,16 +2215,6 @@ void Item_func_between::print(String *str, enum_query_type query_type)
   args[1]->print_parenthesised(str, query_type, precedence());
   str->append(STRING_WITH_LEN(" and "));
   args[2]->print_parenthesised(str, query_type, precedence());
-}
-
-
-uint Item_func_case_abbreviation2::decimal_precision2(Item **args) const
-{
-  int arg0_int_part= args[0]->decimal_int_part();
-  int arg1_int_part= args[1]->decimal_int_part();
-  int max_int_part= MY_MAX(arg0_int_part, arg1_int_part);
-  int precision= max_int_part + decimals;
-  return MY_MIN(precision, DECIMAL_MAX_PRECISION);
 }
 
 
@@ -2577,7 +2568,7 @@ Item_func_nullif::fix_length_and_dec()
     thd->change_item_tree(&args[0], m_cache);
     thd->change_item_tree(&args[2], m_cache);
   }
-  set_handler_by_field_type(args[2]->field_type());
+  set_handler(args[2]->type_handler());
   collation.set(args[2]->collation);
   decimals= args[2]->decimals;
   unsigned_flag= args[2]->unsigned_flag;
@@ -2786,10 +2777,10 @@ Item_func_nullif::is_null()
 
 Item_func_case::Item_func_case(THD *thd, List<Item> &list,
                                Item *first_expr_arg, Item *else_expr_arg):
-  Item_func_hybrid_field_type(thd),
+  Item_func_case_expression(thd),
   Predicant_to_list_comparator(thd, list.elements/*QQ*/),
   first_expr_num(-1), else_expr_num(-1),
-  left_cmp_type(INT_RESULT), m_found_types(0)
+  m_found_types(0)
 {
   ncases= list.elements;
   if (first_expr_arg)
@@ -3055,7 +3046,6 @@ void Item_func_case::fix_length_and_dec()
     }
 
     agg[0]= args[first_expr_num];
-    left_cmp_type= agg[0]->cmp_type();
 
     /*
       As the first expression and WHEN expressions
@@ -3117,6 +3107,7 @@ void Item_func_case::fix_length_and_dec()
 
 Item* Item_func_case::propagate_equal_fields(THD *thd, const Context &ctx, COND_EQUAL *cond)
 {
+  const Type_handler *first_expr_cmp_handler;
   if (first_expr_num == -1)
   {
     // None of the arguments are in a comparison context
@@ -3124,6 +3115,7 @@ Item* Item_func_case::propagate_equal_fields(THD *thd, const Context &ctx, COND_
     return this;
   }
 
+  first_expr_cmp_handler= args[first_expr_num]->type_handler_for_comparison();
   for (uint i= 0; i < arg_count; i++)
   {
     /*
@@ -3162,11 +3154,11 @@ Item* Item_func_case::propagate_equal_fields(THD *thd, const Context &ctx, COND_
                   WHEN 'str2' THEN TRUE
                   ELSE FALSE END;
       */
-      if (m_found_types == (1UL << left_cmp_type))
+      if (m_found_types == (1UL << first_expr_cmp_handler->cmp_type()))
         new_item= args[i]->propagate_equal_fields(thd,
                                                   Context(
                                                     ANY_SUBST,
-                                                    left_cmp_type,
+                                                    first_expr_cmp_handler,
                                                     cmp_collation.collation),
                                                   cond);
     }
@@ -3179,13 +3171,14 @@ Item* Item_func_case::propagate_equal_fields(THD *thd, const Context &ctx, COND_
         replaced to zero-filled constants (only IDENTITY_SUBST allows this).
         Such a change for WHEN arguments would require rebuilding cmp_items.
       */
-      Item_result tmp_cmp_type= item_cmp_type(args[first_expr_num], args[i]);
-      new_item= args[i]->propagate_equal_fields(thd,
-                                                Context(
-                                                  ANY_SUBST,
-                                                  tmp_cmp_type,
-                                                  cmp_collation.collation),
-                                                cond);
+      Type_handler_hybrid_field_type tmp(first_expr_cmp_handler);
+      if (!tmp.aggregate_for_comparison(args[i]->type_handler_for_comparison()))
+        new_item= args[i]->propagate_equal_fields(thd,
+                                                  Context(
+                                                    ANY_SUBST,
+                                                    tmp.type_handler(),
+                                                    cmp_collation.collation),
+                                                  cond);
     }
     else // THEN and ELSE arguments (they are not in comparison)
     {
@@ -3195,18 +3188,6 @@ Item* Item_func_case::propagate_equal_fields(THD *thd, const Context &ctx, COND_
       thd->change_item_tree(&args[i], new_item);
   }
   return this;
-}
-
-
-uint Item_func_case::decimal_precision() const
-{
-  int max_int_part=0;
-  for (uint i=0 ; i < ncases ; i+=2)
-    set_if_bigger(max_int_part, args[i+1]->decimal_int_part());
-
-  if (else_expr_num != -1) 
-    set_if_bigger(max_int_part, args[else_expr_num]->decimal_int_part());
-  return MY_MIN(max_int_part + decimals, DECIMAL_MAX_PRECISION);
 }
 
 
@@ -3757,30 +3738,6 @@ bool Predicant_to_list_comparator::make_unique_cmp_items(THD *thd,
 }
 
 
-cmp_item* cmp_item::get_comparator(Item_result type, Item *warn_item,
-                                   CHARSET_INFO *cs)
-{
-  switch (type) {
-  case STRING_RESULT:
-    return new cmp_item_sort_string(cs);
-  case INT_RESULT:
-    return new cmp_item_int;
-  case REAL_RESULT:
-    return new cmp_item_real;
-  case ROW_RESULT:
-    return new cmp_item_row;
-  case DECIMAL_RESULT:
-    return new cmp_item_decimal;
-  case TIME_RESULT:
-    DBUG_ASSERT(warn_item);
-    return warn_item->field_type() == MYSQL_TYPE_TIME ?
-           (cmp_item *) new cmp_item_time() :
-           (cmp_item *) new cmp_item_datetime();
-  }
-  return 0; // to satisfy compiler :)
-}
-
-
 cmp_item* cmp_item_sort_string::make_same()
 {
   return new cmp_item_sort_string_in_static(cmp_charset);
@@ -3833,7 +3790,8 @@ bool cmp_item_row::alloc_comparators(THD *thd, uint cols)
 void cmp_item_row::store_value(Item *item)
 {
   DBUG_ENTER("cmp_item_row::store_value");
-  if (!alloc_comparators(current_thd, item->cols()))
+  THD *thd= current_thd;
+  if (!alloc_comparators(thd, item->cols()))
   {
     item->bring_value();
     item->null_value= 0;
@@ -3855,10 +3813,11 @@ void cmp_item_row::store_value(Item *item)
           - predicate0, value00, value01
           - predicate1, value10, value11
         */
-        DBUG_ASSERT(item->element_index(i)->cmp_type() != TIME_RESULT);
+        Item *elem= item->element_index(i);
+        const Type_handler *handler= elem->type_handler();
+        DBUG_ASSERT(elem->cmp_type() != TIME_RESULT);
         if (!(comparators[i]=
-              cmp_item::get_comparator(item->element_index(i)->result_type(), 0,
-                                       item->element_index(i)->collation.collation)))
+              handler->make_cmp_item(thd, elem->collation.collation)))
 	  break;					// new failed
       }
       comparators[i]->store_value(item->element_index(i));
@@ -5305,6 +5264,15 @@ int Regexp_processor_pcre::default_regex_flags()
   return default_regex_flags_pcre(current_thd);
 }
 
+void Regexp_processor_pcre::set_recursion_limit(THD *thd)
+{
+  long stack_used;
+  DBUG_ASSERT(thd == current_thd);
+  stack_used= available_stack_size(thd->thread_stack, &stack_used);
+  m_pcre_extra.match_limit_recursion=
+    (my_thread_stack_size - stack_used)/my_pcre_frame_size;
+}
+
 
 /**
   Convert string to lib_charset, if needed.
@@ -5396,14 +5364,76 @@ void Regexp_processor_pcre::pcre_exec_warn(int rc) const
   */
   switch (rc)
   {
+  case PCRE_ERROR_NULL:
+    errmsg= "pcre_exec: null arguement passed";
+    break;
+  case PCRE_ERROR_BADOPTION:
+    errmsg= "pcre_exec: bad option";
+    break;
+  case PCRE_ERROR_BADMAGIC:
+    errmsg= "pcre_exec: bad magic - not a compiled regex";
+    break;
+  case PCRE_ERROR_UNKNOWN_OPCODE:
+    errmsg= "pcre_exec: error in compiled regex";
+    break;
   case PCRE_ERROR_NOMEMORY:
     errmsg= "pcre_exec: Out of memory";
+    break;
+  case PCRE_ERROR_NOSUBSTRING:
+    errmsg= "pcre_exec: no substring";
+    break;
+  case PCRE_ERROR_MATCHLIMIT:
+    errmsg= "pcre_exec: match limit exceeded";
+    break;
+  case PCRE_ERROR_CALLOUT:
+    errmsg= "pcre_exec: callout error";
     break;
   case PCRE_ERROR_BADUTF8:
     errmsg= "pcre_exec: Invalid utf8 byte sequence in the subject string";
     break;
+  case PCRE_ERROR_BADUTF8_OFFSET:
+    errmsg= "pcre_exec: Started at invalid location within utf8 byte sequence";
+    break;
+  case PCRE_ERROR_PARTIAL:
+    errmsg= "pcre_exec: partial match";
+    break;
+  case PCRE_ERROR_INTERNAL:
+    errmsg= "pcre_exec: internal error";
+    break;
+  case PCRE_ERROR_BADCOUNT:
+    errmsg= "pcre_exec: ovesize is negative";
+    break;
+  case PCRE_ERROR_RECURSIONLIMIT:
+    my_snprintf(buf, sizeof(buf), "pcre_exec: recursion limit of %ld exceeded",
+                m_pcre_extra.match_limit_recursion);
+    errmsg= buf;
+    break;
+  case PCRE_ERROR_BADNEWLINE:
+    errmsg= "pcre_exec: bad newline options";
+    break;
+  case PCRE_ERROR_BADOFFSET:
+    errmsg= "pcre_exec: start offset negative or greater than string length";
+    break;
+  case PCRE_ERROR_SHORTUTF8:
+    errmsg= "pcre_exec: ended in middle of utf8 sequence";
+    break;
+  case PCRE_ERROR_JIT_STACKLIMIT:
+    errmsg= "pcre_exec: insufficient stack memory for JIT compile";
+    break;
   case PCRE_ERROR_RECURSELOOP:
     errmsg= "pcre_exec: Recursion loop detected";
+    break;
+  case PCRE_ERROR_BADMODE:
+    errmsg= "pcre_exec: compiled pattern passed to wrong bit library function";
+    break;
+  case PCRE_ERROR_BADENDIANNESS:
+    errmsg= "pcre_exec: compiled pattern passed to wrong endianness processor";
+    break;
+  case PCRE_ERROR_JIT_BADOPTION:
+    errmsg= "pcre_exec: bad jit option";
+    break;
+  case PCRE_ERROR_BADLENGTH:
+    errmsg= "pcre_exec: negative length";
     break;
   default:
     /*
@@ -5440,8 +5470,8 @@ int Regexp_processor_pcre::pcre_exec_with_warn(const pcre *code,
 
 bool Regexp_processor_pcre::exec(const char *str, int length, int offset)
 {
-  m_pcre_exec_rc= pcre_exec_with_warn(m_pcre, NULL, str, length, offset, 0,
-                                      m_SubStrVec, m_subpatterns_needed * 3);
+  m_pcre_exec_rc= pcre_exec_with_warn(m_pcre, &m_pcre_extra, str, length, offset, 0,
+                                      m_SubStrVec, array_elements(m_SubStrVec));
   return false;
 }
 
@@ -5451,10 +5481,10 @@ bool Regexp_processor_pcre::exec(String *str, int offset,
 {
   if (!(str= convert_if_needed(str, &subject_converter)))
     return true;
-  m_pcre_exec_rc= pcre_exec_with_warn(m_pcre, NULL,
+  m_pcre_exec_rc= pcre_exec_with_warn(m_pcre, &m_pcre_extra,
                                       str->c_ptr_safe(), str->length(),
                                       offset, 0,
-                                      m_SubStrVec, m_subpatterns_needed * 3);
+                                      m_SubStrVec, array_elements(m_SubStrVec));
   if (m_pcre_exec_rc > 0)
   {
     uint i;
@@ -5512,7 +5542,7 @@ Item_func_regex::fix_length_and_dec()
   if (agg_arg_charsets_for_comparison(cmp_collation, args, 2))
     return;
 
-  re.init(cmp_collation.collation, 0, 0);
+  re.init(cmp_collation.collation, 0);
   re.fix_owner(this, args[0], args[1]);
 }
 
@@ -5536,8 +5566,9 @@ Item_func_regexp_instr::fix_length_and_dec()
   if (agg_arg_charsets_for_comparison(cmp_collation, args, 2))
     return;
 
-  re.init(cmp_collation.collation, 0, 1);
+  re.init(cmp_collation.collation, 0);
   re.fix_owner(this, args[0], args[1]);
+  max_length= MY_INT32_NUM_DECIMAL_DIGITS; // See also Item_func_locate
 }
 
 
@@ -6017,10 +6048,11 @@ Item *Item_bool_rowready_func2::negated_item(THD *thd)
   of the type Item_field or Item_direct_view_ref(Item_field). 
 */
 
-Item_equal::Item_equal(THD *thd, Item *f1, Item *f2, bool with_const_item):
+Item_equal::Item_equal(THD *thd, const Type_handler *handler,
+                       Item *f1, Item *f2, bool with_const_item):
   Item_bool_func(thd), eval_item(0), cond_false(0), cond_true(0),
   context_field(NULL), link_equal_fields(FALSE),
-  m_compare_type(item_cmp_type(f1, f2)),
+  m_compare_handler(handler),
   m_compare_collation(f2->collation.collation)
 {
   const_item_cache= 0;
@@ -6046,7 +6078,7 @@ Item_equal::Item_equal(THD *thd, Item *f1, Item *f2, bool with_const_item):
 Item_equal::Item_equal(THD *thd, Item_equal *item_equal):
   Item_bool_func(thd), eval_item(0), cond_false(0), cond_true(0),
   context_field(NULL), link_equal_fields(FALSE),
-  m_compare_type(item_equal->m_compare_type),
+  m_compare_handler(item_equal->m_compare_handler),
   m_compare_collation(item_equal->m_compare_collation)
 {
   const_item_cache= 0;
@@ -6089,7 +6121,7 @@ void Item_equal::add_const(THD *thd, Item *c)
     return;
   }
   Item *const_item= get_const();
-  switch (Item_equal::compare_type()) {
+  switch (Item_equal::compare_type_handler()->cmp_type()) {
   case TIME_RESULT:
     {
       enum_field_types f_type= context_field->field_type();
@@ -6568,8 +6600,8 @@ longlong Item_equal::val_int()
 void Item_equal::fix_length_and_dec()
 {
   Item *item= get_first(NO_PARTICULAR_TAB, NULL);
-  eval_item= cmp_item::get_comparator(item->cmp_type(), item,
-                                      item->collation.collation);
+  const Type_handler *handler= item->type_handler();
+  eval_item= handler->make_cmp_item(current_thd, item->collation.collation);
 }
 
 

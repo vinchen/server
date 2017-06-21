@@ -1,5 +1,5 @@
 /* Copyright (c) 2000, 2016, Oracle and/or its affiliates.
-   Copyright (c) 2009, 2016, MariaDB
+   Copyright (c) 2009, 2017, MariaDB
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -40,6 +40,7 @@
 #include <my_dir.h>
 #include <sql_common.h>
 #include <errmsg.h>
+#include <ssl_compat.h>
 #include <mysqld_error.h>
 #include <mysys_err.h>
 #include "rpl_handler.h"
@@ -59,7 +60,6 @@
 #include "rpl_tblmap.h"
 #include "debug_sync.h"
 #include "rpl_parallel.h"
-
 
 #define FLAGSTR(V,F) ((V)&(F)?#F" ":"")
 
@@ -82,7 +82,7 @@ ulonglong opt_read_binlog_speed_limit = 0;
 const char *relay_log_index= 0;
 const char *relay_log_basename= 0;
 
-LEX_STRING default_master_connection_name= { (char*) "", 0 };
+LEX_CSTRING default_master_connection_name= { (char*) "", 0 };
 
 /*
   When slave thread exits, we need to remember the temporary tables so we
@@ -3728,8 +3728,7 @@ int
 apply_event_and_update_pos_for_parallel(Log_event* ev, THD* thd,
                                         rpl_group_info *rgi)
 {
-  Relay_log_info* rli= rgi->rli;
-  mysql_mutex_assert_not_owner(&rli->data_lock);
+  mysql_mutex_assert_not_owner(&rgi->rli->data_lock);
   int reason= apply_event_and_update_pos_setup(ev, thd, rgi);
   /*
     In parallel replication, sql_slave_skip_counter is handled in the SQL
@@ -3977,7 +3976,8 @@ static int exec_relay_log_event(THD* thd, Relay_log_info* rli,
         DBUG_RETURN(1);
       }
 
-      if (opt_gtid_ignore_duplicates)
+      if (opt_gtid_ignore_duplicates &&
+          rli->mi->using_gtid != Master_info::USE_GTID_NO)
       {
         int res= rpl_global_gtid_slave_state->check_duplicate_gtid
           (&serial_rgi->current_gtid, serial_rgi);
@@ -4671,9 +4671,7 @@ err_during_init:
 
   DBUG_LEAVE;                                   // Must match DBUG_ENTER()
   my_thread_end();
-#ifdef HAVE_OPENSSL
   ERR_remove_state(0);
-#endif
   pthread_exit(0);
   return 0;                                     // Avoid compiler warnings
 }
@@ -5336,9 +5334,7 @@ err_during_init:
 
   DBUG_LEAVE;                                   // Must match DBUG_ENTER()
   my_thread_end();
-#ifdef HAVE_OPENSSL
   ERR_remove_state(0);
-#endif
   pthread_exit(0);
   return 0;                                     // Avoid compiler warnings
 }
@@ -6290,9 +6286,8 @@ static int queue_event(Master_info* mi,const char* buf, ulong event_len)
           mi->last_queued_gtid.seq_no == 1000)
         goto skip_relay_logging;
     });
-    /* Fall through to default case ... */
 #endif
-
+    /* fall through */
   default:
   default_action:
     DBUG_EXECUTE_IF("kill_slave_io_after_2_events",

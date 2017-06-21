@@ -82,7 +82,7 @@ uintmax_t			cur_page_num;
 /* Skip the checksum verification. */
 static bool			no_check;
 /* Enabled for strict checksum verification. */
-bool				strict_verify = 0;
+bool				strict_verify;
 /* Enabled for rewrite checksum. */
 static bool			do_write;
 /* Mismatches count allowed (0 by default). */
@@ -280,7 +280,8 @@ void print_index_leaf_stats(
 	fprintf(fil_out, "page_no\tdata_size\tn_recs\n");
 	while (it_page != index.leaves.end()) {
 		const per_page_stats& stat = it_page->second;
-		fprintf(fil_out, "%llu\t%lu\t%lu\n", it_page->first, stat.data_size, stat.n_recs);
+		fprintf(fil_out, "%llu\t" ULINTPF "\t" ULINTPF "\n",
+			it_page->first, stat.data_size, stat.n_recs);
 		page_no = stat.right_page_no;
 		it_page = index.leaves.find(page_no);
 	}
@@ -315,12 +316,15 @@ void defrag_analysis(
 	}
 
 	if (index.leaf_pages) {
-		fprintf(fil_out, "count = %lu free = %lu\n", index.count, index.free_pages);
+		fprintf(fil_out, "count = " ULINTPF " free = " ULINTPF "\n",
+			index.count, index.free_pages);
 	}
 
-	fprintf(fil_out, "%llu\t\t%llu\t\t%lu\t\t%lu\t\t%lu\t\t%.2f\t%lu\n",
+	fprintf(fil_out, "%llu\t\t%llu\t\t"
+		ULINTPF "\t\t%lu\t\t" ULINTPF "\t\t%.2f\t" ULINTPF "\n",
 		id, index.leaf_pages, n_leaf_pages, n_merge, n_pages,
-		1.0 - (double)n_pages / (double)n_leaf_pages, index.max_data_size);
+		1.0 - (double)n_pages / (double)n_leaf_pages,
+		index.max_data_size);
 }
 
 void print_leaf_stats(
@@ -571,7 +575,6 @@ is_page_corrupted(
 	if (mach_read_from_4(buf+FIL_PAGE_FILE_FLUSH_LSN_OR_KEY_VERSION) != 0) {
 		is_corrupted = fil_space_verify_crypt_checksum(
 			const_cast<byte*>(buf), page_size,
-			strict_verify, is_log_enabled ? log_file : NULL,
 			mach_read_from_4(buf
 					 + FIL_PAGE_ARCH_LOG_NO_OR_SPACE_ID),
 			cur_page_num);
@@ -581,9 +584,7 @@ is_page_corrupted(
 
 	if (is_corrupted) {
 		is_corrupted = buf_page_is_corrupted(
-			true, buf, page_size, NULL,
-			cur_page_num, strict_verify,
-			is_log_enabled, log_file);
+			true, buf, page_size, NULL);
 	}
 
 	return(is_corrupted);

@@ -124,9 +124,10 @@ the Compact page format is used, i.e ROW_FORMAT != REDUNDANT */
 /** Width of the ZIP_SSIZE flag */
 #define DICT_TF_WIDTH_ZIP_SSIZE		4
 
-/** Width of the ATOMIC_BLOBS flag.  The Antelope file formats broke up
-BLOB and TEXT fields, storing the first 768 bytes in the clustered index.
-Barracuda row formats store the whole blob or text field off-page atomically.
+/** Width of the ATOMIC_BLOBS flag.  The ROW_FORMAT=REDUNDANT and
+ROW_FORMAT=COMPACT broke up BLOB and TEXT fields, storing the first 768 bytes
+in the clustered index. ROW_FORMAT=DYNAMIC and ROW_FORMAT=COMPRESSED
+store the whole blob or text field off-page atomically.
 Secondary indexes are created from this external data using row_ext_t
 to cache the BLOB prefixes. */
 #define DICT_TF_WIDTH_ATOMIC_BLOBS	1
@@ -137,10 +138,6 @@ This flag prevents older engines from attempting to open the table and
 allows InnoDB to update_create_info() accordingly. */
 #define DICT_TF_WIDTH_DATA_DIR		1
 
-/** Width of the SHARED tablespace flag (Oracle MYSQL 5.7).
-Not supported by MariaDB. */
-#define DICT_TF_WIDTH_SHARED_SPACE	1
-
 /**
 Width of the page compression flag
 */
@@ -148,35 +145,19 @@ Width of the page compression flag
 #define DICT_TF_WIDTH_PAGE_COMPRESSION_LEVEL 4
 
 /**
-Width of atomic writes flag
-DEFAULT=0, ON = 1, OFF = 2
+The NO_ROLLBACK flag (3=yes; the values 1,2 used stand for
+ATOMIC_WRITES=ON and ATOMIC_WRITES=OFF between MariaDB 10.1.0 and 10.2.3)
 */
-#define DICT_TF_WIDTH_ATOMIC_WRITES 2
-
-/**
-Width of the page encryption flag
-*/
-#define DICT_TF_WIDTH_PAGE_ENCRYPTION  1
-#define DICT_TF_WIDTH_PAGE_ENCRYPTION_KEY 8
-
-/** Width of the NO_ROLLBACK flag */
-#define DICT_TF_WIDTH_NO_ROLLBACK 1
+#define DICT_TF_WIDTH_NO_ROLLBACK 2
 
 /** Width of all the currently known table flags */
 #define DICT_TF_BITS	(DICT_TF_WIDTH_COMPACT			\
 			+ DICT_TF_WIDTH_ZIP_SSIZE		\
 			+ DICT_TF_WIDTH_ATOMIC_BLOBS		\
 			+ DICT_TF_WIDTH_DATA_DIR		\
-			+ DICT_TF_WIDTH_SHARED_SPACE		\
 			+ DICT_TF_WIDTH_PAGE_COMPRESSION	\
 			+ DICT_TF_WIDTH_PAGE_COMPRESSION_LEVEL	\
-			+ DICT_TF_WIDTH_ATOMIC_WRITES		\
-			+ DICT_TF_WIDTH_PAGE_ENCRYPTION		\
-			+ DICT_TF_WIDTH_PAGE_ENCRYPTION_KEY	\
 			+ DICT_TF_WIDTH_NO_ROLLBACK)
-
-/** A mask of all the known/used bits in table flags */
-#define DICT_TF_BIT_MASK	(~(~0U << DICT_TF_BITS))
 
 /** Zero relative shift position of the COMPACT field */
 #define DICT_TF_POS_COMPACT		0
@@ -189,29 +170,18 @@ Width of the page encryption flag
 /** Zero relative shift position of the DATA_DIR field */
 #define DICT_TF_POS_DATA_DIR		(DICT_TF_POS_ATOMIC_BLOBS	\
 					+ DICT_TF_WIDTH_ATOMIC_BLOBS)
-/** Zero relative shift position of the SHARED TABLESPACE field */
-#define DICT_TF_POS_SHARED_SPACE	(DICT_TF_POS_DATA_DIR		\
-					+ DICT_TF_WIDTH_DATA_DIR)
 /** Zero relative shift position of the PAGE_COMPRESSION field */
-#define DICT_TF_POS_PAGE_COMPRESSION	(DICT_TF_POS_SHARED_SPACE	\
-					+ DICT_TF_WIDTH_SHARED_SPACE)
+#define DICT_TF_POS_PAGE_COMPRESSION	(DICT_TF_POS_DATA_DIR		\
+					+ DICT_TF_WIDTH_DATA_DIR)
 /** Zero relative shift position of the PAGE_COMPRESSION_LEVEL field */
 #define DICT_TF_POS_PAGE_COMPRESSION_LEVEL	(DICT_TF_POS_PAGE_COMPRESSION	\
 					+ DICT_TF_WIDTH_PAGE_COMPRESSION)
-/** Zero relative shift position of the ATOMIC_WRITES field */
-#define DICT_TF_POS_ATOMIC_WRITES	(DICT_TF_POS_PAGE_COMPRESSION_LEVEL \
-					+ DICT_TF_WIDTH_PAGE_COMPRESSION_LEVEL)
-/** Zero relative shift position of the PAGE_ENCRYPTION field */
-#define DICT_TF_POS_PAGE_ENCRYPTION	(DICT_TF_POS_ATOMIC_WRITES	\
-					+ DICT_TF_WIDTH_ATOMIC_WRITES)
-/** Zero relative shift position of the PAGE_ENCRYPTION_KEY field */
-#define DICT_TF_POS_PAGE_ENCRYPTION_KEY	(DICT_TF_POS_PAGE_ENCRYPTION	\
-					+ DICT_TF_WIDTH_PAGE_ENCRYPTION)
 /** Zero relative shift position of the NO_ROLLBACK field */
-#define DICT_TF_POS_NO_ROLLBACK		(DICT_TF_POS_PAGE_ENCRYPTION_KEY     \
-					+ DICT_TF_WIDTH_PAGE_ENCRYPTION_KEY)
-#define DICT_TF_POS_UNUSED		(DICT_TF_POS_NO_ROLLBACK	\
+#define DICT_TF_POS_NO_ROLLBACK		(DICT_TF_POS_PAGE_COMPRESSION_LEVEL \
+					+ DICT_TF_WIDTH_PAGE_COMPRESSION_LEVEL)
+#define DICT_TF_POS_UNUSED		(DICT_TF_POS_NO_ROLLBACK     \
 					+ DICT_TF_WIDTH_NO_ROLLBACK)
+
 /** Bit mask of the COMPACT field */
 #define DICT_TF_MASK_COMPACT				\
 		((~(~0U << DICT_TF_WIDTH_COMPACT))	\
@@ -236,18 +206,10 @@ Width of the page encryption flag
 #define DICT_TF_MASK_PAGE_COMPRESSION_LEVEL		\
 		((~(~0U << DICT_TF_WIDTH_PAGE_COMPRESSION_LEVEL)) \
 		<< DICT_TF_POS_PAGE_COMPRESSION_LEVEL)
-/** Bit mask of the ATOMIC_WRITES field */
-#define DICT_TF_MASK_ATOMIC_WRITES		\
-		((~(~0U << DICT_TF_WIDTH_ATOMIC_WRITES)) \
-		<< DICT_TF_POS_ATOMIC_WRITES)
-/** Bit mask of the PAGE_ENCRYPTION field */
-#define DICT_TF_MASK_PAGE_ENCRYPTION			\
-		((~(~0U << DICT_TF_WIDTH_PAGE_ENCRYPTION))	\
-		<< DICT_TF_POS_PAGE_ENCRYPTION)
-/** Bit mask of the PAGE_ENCRYPTION_KEY field */
-#define DICT_TF_MASK_PAGE_ENCRYPTION_KEY		\
-		((~(~0U << DICT_TF_WIDTH_PAGE_ENCRYPTION_KEY)) \
-		<< DICT_TF_POS_PAGE_ENCRYPTION_KEY)
+/** Bit mask of the NO_ROLLBACK field */
+#define DICT_TF_MASK_NO_ROLLBACK		\
+		((~(~0U << DICT_TF_WIDTH_NO_ROLLBACK)) \
+		<< DICT_TF_POS_NO_ROLLBACK)
 
 /** Return the value of the COMPACT field */
 #define DICT_TF_GET_COMPACT(flags)			\
@@ -273,22 +235,7 @@ Width of the page encryption flag
 #define DICT_TF_GET_PAGE_COMPRESSION_LEVEL(flags)       \
 		((flags & DICT_TF_MASK_PAGE_COMPRESSION_LEVEL)	\
 		>> DICT_TF_POS_PAGE_COMPRESSION_LEVEL)
-/** Return the value of the ATOMIC_WRITES field */
-#define DICT_TF_GET_ATOMIC_WRITES(flags)       \
-		((flags & DICT_TF_MASK_ATOMIC_WRITES)	\
-		>> DICT_TF_POS_ATOMIC_WRITES)
-/** Return the contents of the PAGE_ENCRYPTION field */
-#define DICT_TF_GET_PAGE_ENCRYPTION(flags)			\
-		((flags & DICT_TF_MASK_PAGE_ENCRYPTION) \
-		>> DICT_TF_POS_PAGE_ENCRYPTION)
-/** Return the contents of the PAGE_ENCRYPTION KEY field */
-#define DICT_TF_GET_PAGE_ENCRYPTION_KEY(flags)			\
-		((flags & DICT_TF_MASK_PAGE_ENCRYPTION_KEY) \
-		>> DICT_TF_POS_PAGE_ENCRYPTION_KEY)
 
-/** Return the contents of the UNUSED bits */
-#define DICT_TF_GET_UNUSED(flags)			\
-		(flags >> DICT_TF_POS_UNUSED)
 /* @} */
 
 /** @brief Table Flags set number 2.
@@ -299,13 +246,12 @@ created with old versions of InnoDB that only implemented
 ROW_FORMAT=REDUNDANT.  InnoDB engines do not check these flags
 for unknown bits in order to protect backward incompatibility. */
 /* @{ */
-/** Total number of bits in table->flags2. */
-#define DICT_TF2_BITS			9
 /* The higher two bytes of SYS_TABLES.MIX_LEN is used by 
 instant add columns */
 #define DICT_TF2_MAX_BITS 16
-#define DICT_TF2_UNUSED_BIT_MASK	(~0U << DICT_TF2_BITS | \
-					 1U << DICT_TF_POS_SHARED_SPACE)
+/** Total number of bits in table->flags2. */
+#define DICT_TF2_BITS			7
+#define DICT_TF2_UNUSED_BIT_MASK	(~0U << DICT_TF2_BITS)
 #define DICT_TF2_BIT_MASK		~DICT_TF2_UNUSED_BIT_MASK
 
 /** TEMPORARY; TRUE for tables from CREATE TEMPORARY TABLE. */
@@ -688,7 +634,8 @@ struct dict_col_t{
 					of an index */
 	unsigned	max_prefix:12;	/*!< maximum index prefix length on
 					this column. Our current max limit is
-					3072 for Barracuda table */
+					3072 (REC_VERSION_56_MAX_INDEX_COL_LEN)
+					bytes. */
 
 	dict_col_def_t*		def_val;/*!< default value of added columns */
 };
@@ -771,17 +718,17 @@ files would be at risk! */
 /** Find out maximum indexed column length by its table format.
 For ROW_FORMAT=REDUNDANT and ROW_FORMAT=COMPACT, the maximum
 field length is REC_ANTELOPE_MAX_INDEX_COL_LEN - 1 (767). For
-Barracuda row formats COMPRESSED and DYNAMIC, the length could
+ROW_FORMAT=COMPRESSED and ROW_FORMAT=DYNAMIC, the length could
 be REC_VERSION_56_MAX_INDEX_COL_LEN (3072) bytes */
-#define DICT_MAX_FIELD_LEN_BY_FORMAT(table)				\
-		((dict_table_get_format(table) < UNIV_FORMAT_B)		\
-			? (REC_ANTELOPE_MAX_INDEX_COL_LEN - 1)		\
-			: REC_VERSION_56_MAX_INDEX_COL_LEN)
+#define DICT_MAX_FIELD_LEN_BY_FORMAT(table)	\
+	(dict_table_has_atomic_blobs(table)	\
+	 ? REC_VERSION_56_MAX_INDEX_COL_LEN	\
+	 : REC_ANTELOPE_MAX_INDEX_COL_LEN - 1)
 
-#define DICT_MAX_FIELD_LEN_BY_FORMAT_FLAG(flags)			\
-		((DICT_TF_HAS_ATOMIC_BLOBS(flags) < UNIV_FORMAT_B)	\
-			? (REC_ANTELOPE_MAX_INDEX_COL_LEN - 1)		\
-			: REC_VERSION_56_MAX_INDEX_COL_LEN)
+#define DICT_MAX_FIELD_LEN_BY_FORMAT_FLAG(flags)	\
+	(DICT_TF_HAS_ATOMIC_BLOBS(flags)		\
+	 ? REC_VERSION_56_MAX_INDEX_COL_LEN		\
+	 : REC_ANTELOPE_MAX_INDEX_COL_LEN - 1)
 
 /** Defines the maximum fixed length column size */
 #define DICT_MAX_FIXED_COL_LEN		DICT_ANTELOPE_MAX_INDEX_COL_LEN
@@ -952,8 +899,6 @@ struct dict_index_t{
 	dict_field_t*	fields;	/*!< array of field descriptions */
 	st_mysql_ftparser*
 			parser;	/*!< fulltext parser plugin */
-	bool		is_ngram;
-				/*!< true if it's ngram parser */
 	bool		has_new_v_col;
 				/*!< whether it has a newly added virtual
 				column in ALTER */
@@ -1046,6 +991,13 @@ struct dict_index_t{
 		ut_ad(committed || !(type & DICT_CLUSTERED));
 		uncommitted = !committed;
 	}
+
+	/** @return whether this index is readable
+	@retval	true	normally
+	@retval	false	if this is a single-table tablespace
+			and the .ibd file is missing, or a
+			page cannot be read or decrypted */
+	inline bool is_readable() const;
 };
 
 /** The status of online index creation */
@@ -1383,18 +1335,22 @@ struct dict_table_t {
 	/** Acquire the table handle. */
 	inline void acquire();
 
-	void*		thd;		/*!< thd */
-	bool		page_0_read; /*!< true if page 0 has
-				     been already read */
-	fil_space_crypt_t *crypt_data; /*!< crypt data if present */
-
 	/** Release the table handle. */
 	inline void release();
 
 	/** @return whether the table supports transactions */
 	bool no_rollback() const
 	{
-		return flags & (1U << DICT_TF_POS_NO_ROLLBACK);
+		return !(~flags & DICT_TF_MASK_NO_ROLLBACK);
+        }
+	/** @return whether this table is readable
+	@retval	true	normally
+	@retval	false	if this is a single-table tablespace
+			and the .ibd file is missing, or a
+			page cannot be read or decrypted */
+	bool is_readable() const
+	{
+		return(UNIV_LIKELY(!file_unreadable));
 	}
 
 	/** Id of the table. */
@@ -1438,15 +1394,12 @@ struct dict_table_t {
 	5 whether the table is being created its own tablespace,
 	6 whether the table has been DISCARDed,
 	7 whether the aux FTS tables names are in hex.
-	8 whether the table is instinc table.
-	9 whether the table has encryption setting.
 	Use DICT_TF2_FLAG_IS_SET() to parse this flag. */
 	unsigned				flags2:DICT_TF2_BITS;
 
-	/** TRUE if this is in a single-table tablespace and the .ibd file is
-	missing. Then we must return in ha_innodb.cc an error if the user
-	tries to query such an orphaned table. */
-	unsigned				ibd_file_missing:1;
+	/*!< whether this is in a single-table tablespace and the .ibd
+	file is missing or page decryption failed and page is corrupted */
+	unsigned				file_unreadable:1;
 
 	/** TRUE if the table object has been added to the dictionary cache. */
 	unsigned				cached:1;
@@ -1771,8 +1724,6 @@ public:
 	/** Timestamp of the last modification of this table. */
 	time_t					update_time;
 
-	bool					is_encrypted;
-
 #ifdef UNIV_DEBUG
 	/** Value of 'magic_n'. */
 	#define DICT_TABLE_MAGIC_N		76333786
@@ -1784,6 +1735,11 @@ public:
 	columns */
 	dict_vcol_templ_t*			vc_templ;
 };
+
+inline bool dict_index_t::is_readable() const
+{
+	return(UNIV_LIKELY(!table->file_unreadable));
+}
 
 /*******************************************************************//**
 Initialise the table lock list. */

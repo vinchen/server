@@ -797,11 +797,11 @@ static MYSQL_SYSVAR_BOOL(
     rocksdb_db_options.use_direct_reads);
 
 static MYSQL_SYSVAR_BOOL(
-    use_direct_writes,
-    *reinterpret_cast<my_bool *>(&rocksdb_db_options.use_direct_writes),
+    use_direct_io_for_flush_and_compaction,
+    *reinterpret_cast<my_bool *>(&rocksdb_db_options.use_direct_io_for_flush_and_compaction),
     PLUGIN_VAR_RQCMDARG | PLUGIN_VAR_READONLY,
-    "DBOptions::use_direct_writes for RocksDB", nullptr, nullptr,
-    rocksdb_db_options.use_direct_writes);
+    "DBOptions::use_direct_io_for_flush_and_compaction for RocksDB", nullptr, nullptr,
+    rocksdb_db_options.use_direct_io_for_flush_and_compaction);
 
 static MYSQL_SYSVAR_BOOL(
     allow_mmap_reads,
@@ -1234,7 +1234,7 @@ static struct st_mysql_sys_var *rocksdb_system_variables[] = {
     MYSQL_SYSVAR(wal_size_limit_mb),
     MYSQL_SYSVAR(manifest_preallocation_size),
     MYSQL_SYSVAR(use_direct_reads),
-    MYSQL_SYSVAR(use_direct_writes),
+    MYSQL_SYSVAR(use_direct_io_for_flush_and_compaction),
     MYSQL_SYSVAR(allow_mmap_reads),
     MYSQL_SYSVAR(allow_mmap_writes),
     MYSQL_SYSVAR(is_fd_close_on_exec),
@@ -3361,9 +3361,9 @@ static int rocksdb_init_func(void *const p) {
   }
 
   if (rocksdb_db_options.allow_mmap_writes &&
-      rocksdb_db_options.use_direct_writes) {
+      rocksdb_db_options.use_direct_io_for_flush_and_compaction) {
     // See above comment for allow_mmap_reads. (NO_LINT_DEBUG)
-    sql_print_error("RocksDB: Can't enable both use_direct_writes "
+    sql_print_error("RocksDB: Can't enable both use_direct_io_for_flush_and_compaction "
                     "and allow_mmap_writes\n");
     DBUG_RETURN(HA_EXIT_FAILURE);
   }
@@ -4977,7 +4977,7 @@ int ha_rocksdb::create_cfs(
               ER_UNKNOWN_ERROR, "Unsupported collation on string indexed "
                                 "column %s.%s Use binary collation (%s).",
               MYF(0), tbl_def_arg->full_tablename().c_str(),
-              table_arg->key_info[i].key_part[part].field->field_name,
+              table_arg->key_info[i].key_part[part].field->field_name.str,
               collation_err.c_str());
           DBUG_RETURN(HA_EXIT_FAILURE);
         }
@@ -5181,8 +5181,8 @@ int ha_rocksdb::compare_key_parts(const KEY *const old_key,
 
   /* Check to see that key parts themselves match */
   for (uint i = 0; i < old_key->user_defined_key_parts; i++) {
-    if (strcmp(old_key->key_part[i].field->field_name,
-               new_key->key_part[i].field->field_name) != 0) {
+    if (strcmp(old_key->key_part[i].field->field_name.str,
+               new_key->key_part[i].field->field_name.str) != 0) {
       DBUG_RETURN(HA_EXIT_FAILURE);
     }
   }

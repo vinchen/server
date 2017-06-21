@@ -4398,7 +4398,7 @@ static void print_partitioning_index(KEY_PART *parts, KEY_PART *parts_end)
   fprintf(DBUG_FILE, "partitioning INDEX(");
   for (KEY_PART *p=parts; p != parts_end; p++)
   {
-    fprintf(DBUG_FILE, "%s%s", p==parts?"":" ,", p->field->field_name);
+    fprintf(DBUG_FILE, "%s%s", p==parts?"":" ,", p->field->field_name.str);
   }
   fputs(");\n", DBUG_FILE);
   DBUG_UNLOCK_FILE;
@@ -4437,7 +4437,7 @@ static void dbug_print_segment_range(SEL_ARG *arg, KEY_PART *part)
       fputs(" <= ", DBUG_FILE);
   }
 
-  fprintf(DBUG_FILE, "%s", part->field->field_name);
+  fprintf(DBUG_FILE, "%s", part->field->field_name.str);
 
   if (!(arg->max_flag & NO_MAX_RANGE))
   {
@@ -4476,7 +4476,7 @@ static void dbug_print_singlepoint_range(SEL_ARG **start, uint num)
   for (SEL_ARG **arg= start; arg != end; arg++)
   {
     Field *field= (*arg)->field;
-    fprintf(DBUG_FILE, "%s%s=", (arg==start)?"":", ", field->field_name);
+    fprintf(DBUG_FILE, "%s%s=", (arg==start)?"":", ", field->field_name.str);
     dbug_print_field(field);
   }
   fputs("\n", DBUG_FILE);
@@ -6955,7 +6955,10 @@ QUICK_SELECT_I *TRP_ROR_UNION::make_quick(PARAM *param,
     {
       if (!(quick= (*scan)->make_quick(param, FALSE, &quick_roru->alloc)) ||
           quick_roru->push_quick_back(quick))
+      {
+        delete quick_roru;
         DBUG_RETURN(NULL);
+      }
     }
     quick_roru->records= records;
     quick_roru->read_time= read_cost;
@@ -7501,6 +7504,8 @@ SEL_TREE *Item_bool_func::get_full_func_mm_tree(RANGE_OPT_PARAM *param,
 		          param->current_table);
 #ifdef HAVE_SPATIAL
   Field::geometry_type sav_geom_type;
+  LINT_INIT_STRUCT(sav_geom_type);
+
   if (field_item->field->type() == MYSQL_TYPE_GEOMETRY)
   {
     sav_geom_type= ((Field_geom*) field_item->field)->geom_type;
@@ -7926,7 +7931,9 @@ Item_func_like::get_mm_leaf(RANGE_OPT_PARAM *param,
   if (!(res= value->val_str(&tmp)))
     DBUG_RETURN(&null_element);
 
-  if (field->cmp_type() != STRING_RESULT)
+  if (field->cmp_type() != STRING_RESULT ||
+      field->type_handler() == &type_handler_enum ||
+      field->type_handler() == &type_handler_set)
     DBUG_RETURN(0);
 
   /*
@@ -8022,27 +8029,59 @@ Item_bool_func::get_mm_leaf(RANGE_OPT_PARAM *param,
     goto end;
 
   err= value->save_in_field_no_warnings(field, 1);
-  if (err == 2 && field->cmp_type() == STRING_RESULT)
-  {
-    if (type == EQ_FUNC || type == EQUAL_FUNC)
-    {
-      tree= new (alloc) SEL_ARG(field, 0, 0);
-      tree->type= SEL_ARG::IMPOSSIBLE;
-    }
-    else 
-      tree= NULL; /*  Cannot infer anything */
-    goto end;
-  }
   if (err > 0)
   {
-    if (field->cmp_type() != value->result_type())
+    if (field->type_handler() == &type_handler_enum ||
+        field->type_handler() == &type_handler_set)
+    {
+      if (type == EQ_FUNC || type == EQUAL_FUNC)
+        tree= new (alloc) SEL_ARG_IMPOSSIBLE(field);
+      goto end;
+    }
+
+    if (err == 2 && field->cmp_type() == STRING_RESULT)
+    {
+      if (type == EQ_FUNC || type == EQUAL_FUNC)
+        tree= new (alloc) SEL_ARG_IMPOSSIBLE(field);
+      else
+        tree= NULL; /*  Cannot infer anything */
+      goto end;
+    }
+
+    if (err == 3 && field->type() == FIELD_TYPE_DATE)
+    {
+      /*
+        We were saving DATETIME into a DATE column, the conversion went ok
+        but a non-zero time part was cut off.
+
+        In MySQL's SQL dialect, DATE and DATETIME are compared as datetime
+        values. Index over a DATE column uses DATE comparison. Changing
+        from one comparison to the other is possible:
+
+        datetime(date_col)< '2007-12-10 12:34:55' -> date_col<='2007-12-10'
+        datetime(date_col)<='2007-12-10 12:34:55' -> date_col<='2007-12-10'
+
+        datetime(date_col)> '2007-12-10 12:34:55' -> date_col>='2007-12-10'
+        datetime(date_col)>='2007-12-10 12:34:55' -> date_col>='2007-12-10'
+
+        but we'll need to convert '>' to '>=' and '<' to '<='. This will
+        be done together with other types at the end of this function
+        (grep for stored_field_cmp_to_item)
+      */
+      if (type == EQ_FUNC || type == EQUAL_FUNC)
+      {
+        tree= new (alloc) SEL_ARG_IMPOSSIBLE(field);
+        goto end;
+      }
+      // Continue with processing non-equality ranges
+    }
+    else if (field->cmp_type() != value->result_type())
     {
       if ((type == EQ_FUNC || type == EQUAL_FUNC) &&
           value->result_type() == item_cmp_type(field->result_type(),
                                                 value->result_type()))
       {
-        tree= new (alloc) SEL_ARG(field, 0, 0);
-        tree->type= SEL_ARG::IMPOSSIBLE;
+        tree= new (alloc) SEL_ARG_IMPOSSIBLE(field);
         goto end;
       }
       else
@@ -8052,31 +8091,7 @@ Item_bool_func::get_mm_leaf(RANGE_OPT_PARAM *param,
           for the cases like int_field > 999999999999999999999999 as well.
         */
         tree= 0;
-        if (err == 3 && field->type() == FIELD_TYPE_DATE &&
-            (type == GT_FUNC || type == GE_FUNC ||
-             type == LT_FUNC || type == LE_FUNC) )
-        {
-          /*
-            We were saving DATETIME into a DATE column, the conversion went ok
-            but a non-zero time part was cut off.
-
-            In MySQL's SQL dialect, DATE and DATETIME are compared as datetime
-            values. Index over a DATE column uses DATE comparison. Changing 
-            from one comparison to the other is possible:
-
-            datetime(date_col)< '2007-12-10 12:34:55' -> date_col<='2007-12-10'
-            datetime(date_col)<='2007-12-10 12:34:55' -> date_col<='2007-12-10'
-
-            datetime(date_col)> '2007-12-10 12:34:55' -> date_col>='2007-12-10'
-            datetime(date_col)>='2007-12-10 12:34:55' -> date_col>='2007-12-10'
-
-            but we'll need to convert '>' to '>=' and '<' to '<='. This will
-            be done together with other types at the end of this function
-            (grep for stored_field_cmp_to_item)
-          */
-        }
-        else
-          goto end;
+        goto end;
       }
     }
 
@@ -10783,9 +10798,7 @@ QUICK_RANGE_SELECT *get_quick_select_for_ref(THD *thd, TABLE *table,
   */
   thd->mem_root= old_root;
 
-  if (!quick || create_err)
-    return 0;			/* no ranges found */
-  if (quick->init())
+  if (!quick || create_err || quick->init())
     goto err;
   quick->records= records;
 

@@ -283,13 +283,13 @@ int mysql_load(THD *thd,sql_exchange *ex,TABLE_LIST *table_list,
   killed_state killed_status;
   bool is_concurrent;
 #endif
-  char *db = table_list->db;			// This is never null
+  const char *db = table_list->db;		// This is never null
   /*
     If path for file is not defined, we will use the current database.
     If this is not set, we will use the directory where the table to be
     loaded is located
   */
-  char *tdb= thd->db ? thd->db : db;		// Result is never null
+  const char *tdb= thd->db ? thd->db : db;	// Result is never null
   ulong skip_lines= ex->skip_lines;
   bool transactional_table __attribute__((unused));
   DBUG_ENTER("mysql_load");
@@ -812,7 +812,7 @@ static bool write_execute_load_query_log_event(THD *thd, sql_exchange* ex,
       if (n++)
         query_str.append(", ");
       if (item->real_type() == Item::FIELD_ITEM)
-        append_identifier(thd, &query_str, item->name, strlen(item->name));
+        append_identifier(thd, &query_str, item->name.str, item->name.length);
       else
       {
         /* Actually Item_user_var_as_out_param despite claiming STRING_ITEM. */
@@ -836,8 +836,8 @@ static bool write_execute_load_query_log_event(THD *thd, sql_exchange* ex,
       val= lv++;
       if (n++)
         query_str.append(STRING_WITH_LEN(", "));
-      append_identifier(thd, &query_str, item->name, strlen(item->name));
-      query_str.append(val->name);
+      append_identifier(thd, &query_str, item->name.str, item->name.length);
+      query_str.append(val->name.str, val->name.length);
     }
   }
 
@@ -1061,7 +1061,7 @@ read_sep_field(THD *thd, COPY_INFO &info, TABLE_LIST *table_list,
     {
       uint length;
       uchar *pos;
-      Item *real_item;
+      Item_field *real_item;
 
       if (read_info.read_field())
 	break;
@@ -1073,19 +1073,29 @@ read_sep_field(THD *thd, COPY_INFO &info, TABLE_LIST *table_list,
       pos=read_info.row_start;
       length=(uint) (read_info.row_end-pos);
 
-      real_item= item->real_item();
+      real_item= item->field_for_view_update();
 
       if ((!read_info.enclosed &&
            (enclosed_length && length == 4 &&
             !memcmp(pos, STRING_WITH_LEN("NULL")))) ||
 	  (length == 1 && read_info.found_null))
       {
-        if (real_item->type() == Item::FIELD_ITEM)
+        if (item->type() == Item::STRING_ITEM)
         {
-          Field *field= ((Item_field *)real_item)->field;
+          ((Item_user_var_as_out_param *)item)->set_null_value(
+                                                  read_info.read_charset);
+        }
+        else if (!real_item)
+        {
+          my_error(ER_NONUPDATEABLE_COLUMN, MYF(0), item->name.str);
+          DBUG_RETURN(1);
+        }
+        else
+        {
+          Field *field= real_item->field;
           if (field->reset())
           {
-            my_error(ER_WARN_NULL_TO_NOTNULL, MYF(0), field->field_name,
+            my_error(ER_WARN_NULL_TO_NOTNULL, MYF(0), field->field_name.str,
                      thd->get_stmt_da()->current_row_for_warning());
             DBUG_RETURN(1);
           }
@@ -1105,39 +1115,29 @@ read_sep_field(THD *thd, COPY_INFO &info, TABLE_LIST *table_list,
           /* Do not auto-update this field. */
           field->set_has_explicit_value();
 	}
-        else if (item->type() == Item::STRING_ITEM)
-        {
-          ((Item_user_var_as_out_param *)item)->set_null_value(
-                                                  read_info.read_charset);
-        }
-        else
-        {
-          my_error(ER_LOAD_DATA_INVALID_COLUMN, MYF(0), item->full_name());
-          DBUG_RETURN(1);
-        }
 
 	continue;
       }
 
-      if (real_item->type() == Item::FIELD_ITEM)
+      if (item->type() == Item::STRING_ITEM)
       {
-        Field *field= ((Item_field *)real_item)->field;
+        ((Item_user_var_as_out_param *)item)->set_value((char*) pos, length,
+                                                        read_info.read_charset);
+      }
+      else if (!real_item)
+      {
+        my_error(ER_NONUPDATEABLE_COLUMN, MYF(0), item->name.str);
+        DBUG_RETURN(1);
+      }
+      else
+      {
+        Field *field= real_item->field;
         field->set_notnull();
         read_info.row_end[0]=0;			// Safe to change end marker
         if (field == table->next_number_field)
           table->auto_increment_field_not_null= TRUE;
         field->store((char*) pos, length, read_info.read_charset);
         field->set_has_explicit_value();
-      }
-      else if (item->type() == Item::STRING_ITEM)
-      {
-        ((Item_user_var_as_out_param *)item)->set_value((char*) pos, length,
-                                                        read_info.read_charset);
-      }
-      else
-      {
-        my_error(ER_LOAD_DATA_INVALID_COLUMN, MYF(0), item->full_name());
-        DBUG_RETURN(1);
       }
     }
 
@@ -1158,13 +1158,23 @@ read_sep_field(THD *thd, COPY_INFO &info, TABLE_LIST *table_list,
 	break;
       for (; item ; item= it++)
       {
-        Item *real_item= item->real_item();
-        if (real_item->type() == Item::FIELD_ITEM)
+        Item_field *real_item= item->field_for_view_update();
+        if (item->type() == Item::STRING_ITEM)
         {
-          Field *field= ((Item_field *)real_item)->field;
+          ((Item_user_var_as_out_param *)item)->set_null_value(
+                                                  read_info.read_charset);
+        }
+        else if (!real_item)
+        {
+          my_error(ER_NONUPDATEABLE_COLUMN, MYF(0), item->name.str);
+          DBUG_RETURN(1);
+        }
+        else
+        {
+          Field *field= real_item->field;
           if (field->reset())
           {
-            my_error(ER_WARN_NULL_TO_NOTNULL, MYF(0),field->field_name,
+            my_error(ER_WARN_NULL_TO_NOTNULL, MYF(0),field->field_name.str,
                      thd->get_stmt_da()->current_row_for_warning());
             DBUG_RETURN(1);
           }
@@ -1182,16 +1192,6 @@ read_sep_field(THD *thd, COPY_INFO &info, TABLE_LIST *table_list,
                               ER_WARN_TOO_FEW_RECORDS,
                               ER_THD(thd, ER_WARN_TOO_FEW_RECORDS),
                               thd->get_stmt_da()->current_row_for_warning());
-        }
-        else if (item->type() == Item::STRING_ITEM)
-        {
-          ((Item_user_var_as_out_param *)item)->set_null_value(
-                                                  read_info.read_charset);
-        }
-        else
-        {
-          my_error(ER_LOAD_DATA_INVALID_COLUMN, MYF(0), item->full_name());
-          DBUG_RETURN(1);
         }
       }
     }
@@ -1296,14 +1296,22 @@ read_xml_field(THD *thd, COPY_INFO &info, TABLE_LIST *table_list,
       xmlit.rewind();
       tag= xmlit++;
       
-      while(tag && strcmp(tag->field.c_ptr(), item->name) != 0)
+      while(tag && strcmp(tag->field.c_ptr(), item->name.str) != 0)
         tag= xmlit++;
       
+      Item_field *real_item= item->field_for_view_update();
       if (!tag) // found null
       {
-        if (item->type() == Item::FIELD_ITEM)
+        if (item->type() == Item::STRING_ITEM)
+          ((Item_user_var_as_out_param *) item)->set_null_value(cs);
+        else if (!real_item)
         {
-          Field *field= ((Item_field *) item)->field;
+          my_error(ER_NONUPDATEABLE_COLUMN, MYF(0), item->name.str);
+          DBUG_RETURN(1);
+        }
+        else
+        {
+          Field *field= real_item->field;
           field->reset();
           field->set_null();
           if (field == table->next_number_field)
@@ -1319,12 +1327,19 @@ read_xml_field(THD *thd, COPY_INFO &info, TABLE_LIST *table_list,
           /* Do not auto-update this field. */
           field->set_has_explicit_value();
         }
-        else
-          ((Item_user_var_as_out_param *) item)->set_null_value(cs);
         continue;
       }
 
-      if (item->type() == Item::FIELD_ITEM)
+      if (item->type() == Item::STRING_ITEM)
+        ((Item_user_var_as_out_param *) item)->set_value(
+                                                 (char *) tag->value.ptr(),
+                                                 tag->value.length(), cs);
+      else if (!real_item)
+      {
+        my_error(ER_NONUPDATEABLE_COLUMN, MYF(0), item->name.str);
+        DBUG_RETURN(1);
+      }
+      else
       {
 
         Field *field= ((Item_field *)item)->field;
@@ -1334,10 +1349,6 @@ read_xml_field(THD *thd, COPY_INFO &info, TABLE_LIST *table_list,
         field->store((char *) tag->value.ptr(), tag->value.length(), cs);
         field->set_has_explicit_value();
       }
-      else
-        ((Item_user_var_as_out_param *) item)->set_value(
-                                                 (char *) tag->value.ptr(), 
-                                                 tag->value.length(), cs);
     }
     
     if (read_info.error)
@@ -1357,7 +1368,15 @@ read_xml_field(THD *thd, COPY_INFO &info, TABLE_LIST *table_list,
       
       for ( ; item; item= it++)
       {
-        if (item->type() == Item::FIELD_ITEM)
+        Item_field *real_item= item->field_for_view_update();
+        if (item->type() == Item::STRING_ITEM)
+          ((Item_user_var_as_out_param *)item)->set_null_value(cs);
+        else if (!real_item)
+        {
+          my_error(ER_NONUPDATEABLE_COLUMN, MYF(0), item->name.str);
+          DBUG_RETURN(1);
+        }
+        else
         {
           /*
             QQ: We probably should not throw warning for each field.
@@ -1371,8 +1390,6 @@ read_xml_field(THD *thd, COPY_INFO &info, TABLE_LIST *table_list,
                               ER_THD(thd, ER_WARN_TOO_FEW_RECORDS),
                               thd->get_stmt_da()->current_row_for_warning());
         }
-        else
-          ((Item_user_var_as_out_param *)item)->set_null_value(cs);
       }
     }
 

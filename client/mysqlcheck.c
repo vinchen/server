@@ -1,6 +1,6 @@
 /*
    Copyright (c) 2001, 2013, Oracle and/or its affiliates.
-   Copyright (c) 2010, 2016, MariaDB
+   Copyright (c) 2010, 2017, MariaDB
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -19,6 +19,8 @@
 /* By Jani Tolonen, 2001-04-20, MySQL Development Team */
 
 #define CHECK_VERSION "2.7.4-MariaDB"
+/* Avoid warnings from %'s format */
+#define USING_MARIADB_SNPRINTF_EXTENSIONS
 
 #include "client_priv.h"
 #include <m_ctype.h>

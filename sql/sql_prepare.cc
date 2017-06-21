@@ -1,5 +1,5 @@
 /* Copyright (c) 2002, 2015, Oracle and/or its affiliates.
-   Copyright (c) 2008, 2016, MariaDB
+   Copyright (c) 2008, 2017, MariaDB
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -164,7 +164,6 @@ public:
   Server_side_cursor *cursor;
   uchar *packet;
   uchar *packet_end;
-  ulong iterations;
   uint param_count;
   uint last_errno;
   uint flags;
@@ -183,7 +182,9 @@ public:
   */
   uint select_number_after_prepare;
   char last_error[MYSQL_ERRMSG_SIZE];
+  my_bool iterations;
   my_bool start_param;
+  my_bool read_types;
 #ifndef EMBEDDED_LIBRARY
   bool (*set_params)(Prepared_statement *st, uchar *data, uchar *data_end,
                      uchar *read_pos, String *expanded_query);
@@ -202,7 +203,7 @@ public:
   void setup_set_params();
   virtual Query_arena::Type type() const;
   virtual void cleanup_stmt();
-  bool set_name(LEX_STRING *name);
+  bool set_name(LEX_CSTRING *name);
   inline void close_cursor() { delete cursor; cursor= 0; }
   inline bool is_in_use() { return flags & (uint) IS_IN_USE; }
   inline bool is_sql_prepare() const { return flags & (uint) IS_SQL_PREPARE; }
@@ -213,11 +214,10 @@ public:
                     uchar *packet_arg, uchar *packet_end_arg);
   bool execute_bulk_loop(String *expanded_query,
                          bool open_cursor,
-                         uchar *packet_arg, uchar *packet_end_arg,
-                         ulong iterations);
+                         uchar *packet_arg, uchar *packet_end_arg);
   bool execute_server_runnable(Server_runnable *server_runnable);
   my_bool set_bulk_parameters(bool reset);
-  ulong bulk_iterations();
+  bool bulk_iterations() { return iterations; };
   /* Destroy this statement */
   void deallocate();
   bool execute_immediate(const char *query, uint query_length);
@@ -819,18 +819,6 @@ static void setup_one_conversion_function(THD *thd, Item_param *param,
 #ifndef EMBEDDED_LIBRARY
 
 /**
-  Check whether this parameter data type is compatible with long data.
-  Used to detect whether a long data stream has been supplied to a
-  incompatible data type.
-*/
-inline bool is_param_long_data_type(Item_param *param)
-{
-  return ((param->field_type() >= MYSQL_TYPE_TINY_BLOB) &&
-          (param->field_type() <= MYSQL_TYPE_STRING));
-}
-
-
-/**
   Routines to assign parameters from data supplied by the client.
 
     Update the parameter markers by reading data from the packet and
@@ -907,7 +895,7 @@ static bool insert_params_with_log(Prepared_statement *stmt, uchar *null_array,
       type (the types are supplied at execute). Check that the
       supplied type of placeholder can accept a data stream.
     */
-    else if (! is_param_long_data_type(param))
+    else if (!param->type_handler()->is_param_long_data_type())
       DBUG_RETURN(1);
 
     if (acc.append(param))
@@ -935,6 +923,7 @@ static bool insert_params(Prepared_statement *stmt, uchar *null_array,
   for (Item_param **it= begin; it < end; ++it)
   {
     Item_param *param= *it;
+    param->indicator= STMT_INDICATOR_NONE; // only for bulk parameters
     if (!param->has_long_data_value())
     {
       if (is_param_null(null_array, (uint) (it - begin)))
@@ -954,7 +943,7 @@ static bool insert_params(Prepared_statement *stmt, uchar *null_array,
       type (the types are supplied at execute). Check that the
       supplied type of placeholder can accept a data stream.
     */
-    else if (! is_param_long_data_type(param))
+    else if (!param->type_handler()->is_param_long_data_type())
       DBUG_RETURN(1);
     if (param->convert_str_value(stmt->thd))
       DBUG_RETURN(1);                           /* out of memory */
@@ -979,10 +968,7 @@ static bool insert_bulk_params(Prepared_statement *stmt,
       param->reset();
     if (!param->has_long_data_value())
     {
-      if (param->indicators)
-        param->indicator= (enum_indicator_type) *((*read_pos)++);
-      else
-        param->indicator= STMT_INDICATOR_NONE;
+      param->indicator= (enum_indicator_type) *((*read_pos)++);
       if ((*read_pos) > data_end)
         DBUG_RETURN(1);
       switch (param->indicator)
@@ -993,6 +979,8 @@ static bool insert_bulk_params(Prepared_statement *stmt,
         param->set_param_func(param, read_pos, (uint) (data_end - (*read_pos)));
         if (param->has_no_value())
           DBUG_RETURN(1);
+        if (param->convert_str_value(stmt->thd))
+          DBUG_RETURN(1);                           /* out of memory */
         break;
       case STMT_INDICATOR_NULL:
         param->set_null();
@@ -1011,6 +999,36 @@ static bool insert_bulk_params(Prepared_statement *stmt,
   DBUG_RETURN(0);
 }
 
+static bool set_conversion_functions(Prepared_statement *stmt,
+                                     uchar **data, uchar *data_end)
+{
+  uchar *read_pos= *data;
+  const uint signed_bit= 1 << 15;
+  DBUG_ENTER("set_conversion_functions");
+  /*
+     First execute or types altered by the client, setup the
+     conversion routines for all parameters (one time)
+   */
+  Item_param **it= stmt->param_array;
+  Item_param **end= it + stmt->param_count;
+  THD *thd= stmt->thd;
+  for (; it < end; ++it)
+  {
+    ushort typecode;
+
+    if (read_pos >= data_end)
+      DBUG_RETURN(1);
+
+    typecode= sint2korr(read_pos);
+    read_pos+= 2;
+    (**it).unsigned_flag= MY_TEST(typecode & signed_bit);
+    setup_one_conversion_function(thd, *it, (uchar) (typecode & 0xff));
+  }
+  *data= read_pos;
+  DBUG_RETURN(0);
+}
+
+
 static bool setup_conversion_functions(Prepared_statement *stmt,
                                        uchar **data, uchar *data_end,
                                        bool bulk_protocol= 0)
@@ -1024,30 +1042,9 @@ static bool setup_conversion_functions(Prepared_statement *stmt,
 
   if (*read_pos++) //types supplied / first execute
   {
-    /*
-      First execute or types altered by the client, setup the
-      conversion routines for all parameters (one time)
-    */
-    Item_param **it= stmt->param_array;
-    Item_param **end= it + stmt->param_count;
-    THD *thd= stmt->thd;
-    for (; it < end; ++it)
-    {
-      ushort typecode;
-      const uint signed_bit= 1 << 15;
-      const uint indicators_bit= 1 << 14;
-
-      if (read_pos >= data_end)
-        DBUG_RETURN(1);
-
-      typecode= sint2korr(read_pos);
-      read_pos+= 2;
-      (**it).unsigned_flag= MY_TEST(typecode & signed_bit);
-      if (bulk_protocol)
-        (**it).indicators= MY_TEST(typecode & indicators_bit);
-      setup_one_conversion_function(thd, *it,
-                                    (uchar) (typecode & 0xff));
-    }
+    *data= read_pos;
+    bool res= set_conversion_functions(stmt, data, data_end);
+    DBUG_RETURN(res);
   }
   *data= read_pos;
   DBUG_RETURN(0);
@@ -1952,8 +1949,7 @@ static int mysql_test_show_grants(Prepared_statement *stmt)
   THD *thd= stmt->thd;
   List<Item> fields;
 
-  mysql_show_grants_get_fields(thd, &fields, "Grants for");
-    
+  mysql_show_grants_get_fields(thd, &fields, STRING_WITH_LEN("Grants for"));
   DBUG_RETURN(send_stmt_metadata(thd, stmt, &fields));
 }
 #endif /*NO_EMBEDDED_ACCESS_CHECKS*/
@@ -2276,7 +2272,7 @@ static int mysql_test_handler_read(Prepared_statement *stmt,
   {
     if (!lex->result && !(lex->result= new (stmt->mem_root) select_send(thd)))
     {
-      my_error(ER_OUTOFMEMORY, MYF(0), sizeof(select_send));
+      my_error(ER_OUTOFMEMORY, MYF(0), (int) sizeof(select_send));
       DBUG_RETURN(1);
     }
     if (send_prep_stmt(stmt, ha_table->fields.elements) ||
@@ -2356,7 +2352,7 @@ static bool check_prepared_statement(Prepared_statement *stmt)
     /* mysql_test_update returns 2 if we need to switch to multi-update */
     if (res != 2)
       break;
-
+    /* fall through */
   case SQLCOM_UPDATE_MULTI:
     res= mysql_test_multiupdate(stmt, tables, res == 2);
     break;
@@ -2493,6 +2489,7 @@ static bool check_prepared_statement(Prepared_statement *stmt)
   case SQLCOM_DROP_SEQUENCE:
   case SQLCOM_RENAME_TABLE:
   case SQLCOM_ALTER_TABLE:
+  case SQLCOM_ALTER_SEQUENCE:
   case SQLCOM_COMMIT:
   case SQLCOM_CREATE_INDEX:
   case SQLCOM_DROP_INDEX:
@@ -2774,7 +2771,7 @@ bool LEX::get_dynamic_sql_string(LEX_CSTRING *dst, String *buffer)
 void mysql_sql_stmt_prepare(THD *thd)
 {
   LEX *lex= thd->lex;
-  LEX_STRING *name= &lex->prepared_stmt_name;
+  LEX_CSTRING *name= &lex->prepared_stmt_name;
   Prepared_statement *stmt;
   LEX_CSTRING query;
   DBUG_ENTER("mysql_sql_stmt_prepare");
@@ -3034,6 +3031,14 @@ static void reset_stmt_params(Prepared_statement *stmt)
 }
 
 
+static void mysql_stmt_execute_common(THD *thd,
+                                      ulong stmt_id,
+                                      uchar *packet,
+                                      uchar *packet_end,
+                                      ulong cursor_flags,
+                                      bool iteration,
+                                      bool types);
+
 /**
   COM_STMT_EXECUTE handler: execute a previously prepared statement.
 
@@ -3056,20 +3061,91 @@ void mysqld_stmt_execute(THD *thd, char *packet_arg, uint packet_length)
   uchar *packet= (uchar*)packet_arg; // GCC 4.0.1 workaround
   ulong stmt_id= uint4korr(packet);
   ulong flags= (ulong) packet[4];
-#ifndef EMBEDDED_LIBRARY
-  ulong iterations= uint4korr(packet + 5);
-#else
-  ulong iterations= 0; // no support
-#endif
-  /* Query text for binary, general or slow log, if any of them is open */
-  String expanded_query;
   uchar *packet_end= packet + packet_length;
-  Prepared_statement *stmt;
-  Protocol *save_protocol= thd->protocol;
-  bool open_cursor;
   DBUG_ENTER("mysqld_stmt_execute");
 
   packet+= 9;                               /* stmt_id + 5 bytes of flags */
+
+  mysql_stmt_execute_common(thd, stmt_id, packet, packet_end, flags, FALSE,
+  FALSE);
+  DBUG_VOID_RETURN;
+}
+
+
+/**
+  COM_STMT_BULK_EXECUTE handler: execute a previously prepared statement.
+
+    If there are any parameters, then replace parameter markers with the
+    data supplied from the client, and then execute the statement.
+    This function uses binary protocol to send a possible result set
+    to the client.
+
+  @param thd                current thread
+  @param packet_arg         parameter types and data, if any
+  @param packet_length      packet length, including the terminator character.
+
+  @return
+    none: in case of success OK packet or a result set is sent to the
+    client, otherwise an error message is set in THD.
+*/
+
+void mysqld_stmt_bulk_execute(THD *thd, char *packet_arg, uint packet_length)
+{
+  uchar *packet= (uchar*)packet_arg; // GCC 4.0.1 workaround
+  ulong stmt_id= uint4korr(packet);
+  uint flags= (uint) uint2korr(packet + 4);
+  uchar *packet_end= packet + packet_length;
+  DBUG_ENTER("mysqld_stmt_execute_bulk");
+
+  if (!(thd->client_capabilities &
+        MARIADB_CLIENT_STMT_BULK_OPERATIONS))
+  {
+    DBUG_PRINT("error",
+               ("An attempt to execute bulk operation without support"));
+    my_error(ER_UNSUPPORTED_PS, MYF(0));
+  }
+  /* Check for implemented parameters */
+  if (flags & (~STMT_BULK_FLAG_CLIENT_SEND_TYPES))
+  {
+    DBUG_PRINT("error", ("unsupported bulk execute flags %x", flags));
+    my_error(ER_UNSUPPORTED_PS, MYF(0));
+  }
+
+  /* stmt id and two bytes of flags */
+  packet+= 4 + 2;
+  mysql_stmt_execute_common(thd, stmt_id, packet, packet_end, 0, TRUE,
+                            (flags & STMT_BULK_FLAG_CLIENT_SEND_TYPES));
+  DBUG_VOID_RETURN;
+}
+
+
+/**
+  Common part of prepared statement execution
+
+  @param thd             THD handle
+  @param stmt_id         id of the prepared statement
+  @param paket           packet with parameters to bind
+  @param packet_end      pointer to the byte after parameters end
+  @param cursor_flags    cursor flags
+  @param bulk_op         id it bulk operation
+  @param read_types      flag say that types muast been read
+*/
+
+static void mysql_stmt_execute_common(THD *thd,
+                                      ulong stmt_id,
+                                      uchar *packet,
+                                      uchar *packet_end,
+                                      ulong cursor_flags,
+                                      bool bulk_op,
+                                      bool read_types)
+{
+  /* Query text for binary, general or slow log, if any of them is open */
+  String expanded_query;
+  Prepared_statement *stmt;
+  Protocol *save_protocol= thd->protocol;
+  bool open_cursor;
+  DBUG_ENTER("mysqld_stmt_execute_common");
+  DBUG_ASSERT((!read_types) || (read_types && bulk_op));
 
   /* First of all clear possible warnings from the previous command */
   thd->reset_for_next_command();
@@ -3081,21 +3157,21 @@ void mysqld_stmt_execute(THD *thd, char *packet_arg, uint packet_length)
              llstr(stmt_id, llbuf), "mysqld_stmt_execute");
     DBUG_VOID_RETURN;
   }
+  stmt->read_types= read_types;
 
 #if defined(ENABLED_PROFILING)
   thd->profiling.set_query_source(stmt->query(), stmt->query_length());
 #endif
   DBUG_PRINT("exec_query", ("%s", stmt->query()));
-  DBUG_PRINT("info",("stmt: %p iterations: %lu", stmt, iterations));
+  DBUG_PRINT("info",("stmt: %p bulk_op %d", stmt, bulk_op));
 
-  open_cursor= MY_TEST(flags & (ulong) CURSOR_TYPE_READ_ONLY);
+  open_cursor= MY_TEST(cursor_flags & (ulong) CURSOR_TYPE_READ_ONLY);
 
   thd->protocol= &thd->protocol_binary;
-  if (iterations <= 1)
+  if (!bulk_op)
     stmt->execute_loop(&expanded_query, open_cursor, packet, packet_end);
   else
-    stmt->execute_bulk_loop(&expanded_query, open_cursor, packet, packet_end,
-                            iterations);
+    stmt->execute_bulk_loop(&expanded_query, open_cursor, packet, packet_end);
   thd->protocol= save_protocol;
 
   sp_cache_enforce_limit(thd->sp_proc_cache, stored_program_cache_size);
@@ -3129,7 +3205,7 @@ void mysql_sql_stmt_execute(THD *thd)
 {
   LEX *lex= thd->lex;
   Prepared_statement *stmt;
-  LEX_STRING *name= &lex->prepared_stmt_name;
+  LEX_CSTRING *name= &lex->prepared_stmt_name;
   /* Query text for binary, general or slow log, if any of them is open */
   String expanded_query;
   DBUG_ENTER("mysql_sql_stmt_execute");
@@ -3350,7 +3426,7 @@ void mysqld_stmt_close(THD *thd, char *packet)
 void mysql_sql_stmt_close(THD *thd)
 {
   Prepared_statement* stmt;
-  LEX_STRING *name= &thd->lex->prepared_stmt_name;
+  LEX_CSTRING *name= &thd->lex->prepared_stmt_name;
   DBUG_PRINT("info", ("DEALLOCATE PREPARE: %.*s\n", (int) name->length,
                       name->str));
 
@@ -3438,7 +3514,7 @@ void mysql_stmt_get_longdata(THD *thd, char *packet, ulong packet_length)
   {
     stmt->state= Query_arena::STMT_ERROR;
     stmt->last_errno= thd->get_stmt_da()->sql_errno();
-    strncpy(stmt->last_error, thd->get_stmt_da()->message(), MYSQL_ERRMSG_SIZE);
+    strmake_buf(stmt->last_error, thd->get_stmt_da()->message());
   }
   thd->set_stmt_da(save_stmt_da);
 
@@ -3602,11 +3678,12 @@ Prepared_statement::Prepared_statement(THD *thd_arg)
   cursor(0),
   packet(0),
   packet_end(0),
-  iterations(0),
   param_count(0),
   last_errno(0),
   flags((uint) IS_IN_USE),
+  iterations(0),
   start_param(0),
+  read_types(0),
   m_sql_mode(thd->variables.sql_mode)
 {
   init_sql_alloc(&main_mem_root, thd_arg->variables.query_alloc_block_size,
@@ -3643,7 +3720,7 @@ void Prepared_statement::setup_set_params()
     set_params_from_actual_params= insert_params_from_actual_params_with_log;
 #ifndef EMBEDDED_LIBRARY
     set_params= insert_params_with_log;
-    set_bulk_params= insert_bulk_params; // TODO: add binlog support
+    set_bulk_params= insert_bulk_params; // RBR is on for bulk operation
 #else
     //TODO: add bulk support for bulk parameters
     set_params_data= emb_insert_params_with_log;
@@ -3712,7 +3789,7 @@ void Prepared_statement::cleanup_stmt()
 }
 
 
-bool Prepared_statement::set_name(LEX_STRING *name_arg)
+bool Prepared_statement::set_name(LEX_CSTRING *name_arg)
 {
   name.length= name_arg->length;
   name.str= (char*) memdup_root(mem_root, name_arg->str, name_arg->length);
@@ -4025,7 +4102,7 @@ Prepared_statement::execute_loop(String *expanded_query,
   Reprepare_observer reprepare_observer;
   bool error;
   int reprepare_attempt= 0;
-  iterations= 0;
+  iterations= FALSE;
 
   /*
     - In mysql_sql_stmt_execute() we hide all "external" Items
@@ -4128,11 +4205,11 @@ my_bool bulk_parameters_set(THD *thd)
   DBUG_RETURN(FALSE);
 }
 
-ulong bulk_parameters_iterations(THD *thd)
+my_bool bulk_parameters_iterations(THD *thd)
 {
   Prepared_statement *stmt= (Prepared_statement *) thd->bulk_param;
   if (!stmt)
-    return 1;
+    return FALSE;
   return stmt->bulk_iterations();
 }
 
@@ -4140,7 +4217,8 @@ ulong bulk_parameters_iterations(THD *thd)
 my_bool Prepared_statement::set_bulk_parameters(bool reset)
 {
   DBUG_ENTER("Prepared_statement::set_bulk_parameters");
-  DBUG_PRINT("info", ("iteration: %lu", iterations));
+  DBUG_PRINT("info", ("iteration: %d", iterations));
+
   if (iterations)
   {
 #ifndef EMBEDDED_LIBRARY
@@ -4154,31 +4232,24 @@ my_bool Prepared_statement::set_bulk_parameters(bool reset)
       reset_stmt_params(this);
       DBUG_RETURN(true);
     }
-    iterations--;
+    if (packet >= packet_end)
+      iterations= FALSE;
   }
   start_param= 0;
   DBUG_RETURN(false);
-}
-
-ulong Prepared_statement::bulk_iterations()
-{
-  if (iterations)
-    return iterations;
-  return start_param ? 1 : 0;
 }
 
 bool
 Prepared_statement::execute_bulk_loop(String *expanded_query,
                                       bool open_cursor,
                                       uchar *packet_arg,
-                                      uchar *packet_end_arg,
-                                      ulong iterations_arg)
+                                      uchar *packet_end_arg)
 {
   Reprepare_observer reprepare_observer;
   bool error= 0;
   packet= packet_arg;
   packet_end= packet_end_arg;
-  iterations= iterations_arg;
+  iterations= TRUE;
   start_param= true;
 #ifndef DBUG_OFF
   Item *free_list_state= thd->free_list;
@@ -4192,16 +4263,26 @@ Prepared_statement::execute_bulk_loop(String *expanded_query,
     thd->set_bulk_execution(0);
     return TRUE;
   }
+  /* Check for non zero parameter count*/
+  if (param_count == 0)
+  {
+    DBUG_PRINT("error", ("Statement with no parameters for bulk execution."));
+    my_error(ER_UNSUPPORTED_PS, MYF(0));
+    thd->set_bulk_execution(0);
+    return TRUE;
+  }
 
   if (!(sql_command_flags[lex->sql_command] & CF_SP_BULK_SAFE))
   {
+    DBUG_PRINT("error", ("Command is not supported in bulk execution."));
     my_error(ER_UNSUPPORTED_PS, MYF(0));
     thd->set_bulk_execution(0);
     return TRUE;
   }
 
 #ifndef EMBEDDED_LIBRARY
-  if (setup_conversion_functions(this, &packet, packet_end, TRUE))
+  if (read_types &&
+      set_conversion_functions(this, &packet, packet_end))
 #else
   // bulk parameters are not supported for embedded, so it will an error
 #endif
@@ -4212,6 +4293,7 @@ Prepared_statement::execute_bulk_loop(String *expanded_query,
     thd->set_bulk_execution(0);
     return true;
   }
+  read_types= FALSE;
 
 #ifdef NOT_YET_FROM_MYSQL_5_6
   if (unlikely(thd->security_ctx->password_expired &&
@@ -4365,7 +4447,7 @@ Prepared_statement::reprepare()
   char saved_cur_db_name_buf[SAFE_NAME_LEN+1];
   LEX_STRING saved_cur_db_name=
     { saved_cur_db_name_buf, sizeof(saved_cur_db_name_buf) };
-  LEX_STRING stmt_db_name= { db, db_length };
+  LEX_CSTRING stmt_db_name= { db, db_length };
   bool cur_db_changed;
   bool error;
 
@@ -4388,7 +4470,7 @@ Prepared_statement::reprepare()
   thd->variables.sql_mode= save_sql_mode;
 
   if (cur_db_changed)
-    mysql_change_db(thd, &saved_cur_db_name, TRUE);
+    mysql_change_db(thd, (LEX_CSTRING*) &saved_cur_db_name, TRUE);
 
   if (! error)
   {
@@ -4486,7 +4568,7 @@ Prepared_statement::swap_prepared_statement(Prepared_statement *copy)
   /* Don't swap flags: the copy has IS_SQL_PREPARE always set. */
   /* swap_variables(uint, flags, copy->flags); */
   /* Swap names, the old name is allocated in the wrong memory root */
-  swap_variables(LEX_STRING, name, copy->name);
+  swap_variables(LEX_CSTRING, name, copy->name);
   /* Ditto */
   swap_variables(char *, db, copy->db);
   swap_variables(size_t, db_length, copy->db_length);
@@ -4531,7 +4613,7 @@ bool Prepared_statement::execute(String *expanded_query, bool open_cursor)
     { saved_cur_db_name_buf, sizeof(saved_cur_db_name_buf) };
   bool cur_db_changed;
 
-  LEX_STRING stmt_db_name= { db, db_length };
+  LEX_CSTRING stmt_db_name= { db, db_length };
 
   status_var_increment(thd->status_var.com_stmt_execute);
 
@@ -4659,7 +4741,7 @@ bool Prepared_statement::execute(String *expanded_query, bool open_cursor)
   */
 
   if (cur_db_changed)
-    mysql_change_db(thd, &saved_cur_db_name, TRUE);
+    mysql_change_db(thd, (LEX_CSTRING*) &saved_cur_db_name, TRUE);
 
   /* Assert that if an error, no cursor is open */
   DBUG_ASSERT(! (error && cursor));
@@ -4734,8 +4816,8 @@ bool Prepared_statement::execute_immediate(const char *query, uint query_len)
 {
   DBUG_ENTER("Prepared_statement::execute_immediate");
   String expanded_query;
-  static LEX_STRING execute_immediate_stmt_name=
-    {(char*) STRING_WITH_LEN("(immediate)") };
+  static LEX_CSTRING execute_immediate_stmt_name=
+    {STRING_WITH_LEN("(immediate)") };
 
   set_sql_prepare();
   name= execute_immediate_stmt_name;      // for DBUG_PRINT etc

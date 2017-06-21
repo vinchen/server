@@ -1,6 +1,6 @@
 /*****************************************************************************
 
-Copyright (c) 1995, 2016, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 1995, 2017, Oracle and/or its affiliates. All Rights Reserved.
 Copyright (c) 2013, 2017, MariaDB Corporation.
 Copyright (c) 2013, 2014, Fusion-io
 
@@ -70,7 +70,7 @@ is set to TRUE by the page_cleaner thread when it is spawned and is set
 back to FALSE at shutdown by the page_cleaner as well. Therefore no
 need to protect it by a mutex. It is only ever read by the thread
 doing the shutdown */
-bool buf_page_cleaner_is_active = false;
+bool buf_page_cleaner_is_active;
 
 /** Factor for scan length to determine n_pages for intended oldest LSN
 progress */
@@ -269,6 +269,7 @@ buf_flush_insert_in_flush_rbt(
 	buf_page_t*		prev = NULL;
 	buf_pool_t*		buf_pool = buf_pool_from_bpage(bpage);
 
+	ut_ad(srv_shutdown_state != SRV_SHUTDOWN_FLUSH_PHASE);
 	ut_ad(buf_flush_list_mutex_own(buf_pool));
 
 	/* Insert this buffer into the rbt. */
@@ -480,6 +481,7 @@ buf_flush_insert_sorted_into_flush_list(
 	buf_page_t*	prev_b;
 	buf_page_t*	b;
 
+	ut_ad(srv_shutdown_state != SRV_SHUTDOWN_FLUSH_PHASE);
 	ut_ad(!buf_pool_mutex_own(buf_pool));
 	ut_ad(log_flush_order_mutex_own());
 	ut_ad(buf_page_mutex_own(block));
@@ -789,6 +791,7 @@ buf_flush_write_complete(
 
 	flush_type = buf_page_get_flush_type(bpage);
 	buf_pool->n_flush[flush_type]--;
+	ut_ad(buf_pool->n_flush[flush_type] != ULINT_MAX);
 
 	ut_ad(buf_pool_mutex_own(buf_pool));
 
@@ -1006,11 +1009,16 @@ buf_flush_write_block_low(
 	buf_flush_t	flush_type,	/*!< in: type of flush */
 	bool		sync)		/*!< in: true if sync IO request */
 {
+	fil_space_t* space = fil_space_acquire_for_io(bpage->id.space());
+	if (!space) {
+		return;
+	}
+	ut_ad(space->purpose == FIL_TYPE_TEMPORARY
+	      || space->purpose == FIL_TYPE_IMPORT
+	      || space->purpose == FIL_TYPE_TABLESPACE);
+	const bool	is_temp = space->purpose == FIL_TYPE_TEMPORARY;
+	ut_ad(is_temp == fsp_is_system_temporary(space->id));
 	page_t*	frame = NULL;
-	ulint space_id = bpage->id.space();
-	const bool is_temp = fsp_is_system_temporary(space_id);
-	bool atomic_writes = is_temp || fil_space_get_atomic_writes(space_id);
-
 #ifdef UNIV_DEBUG
 	buf_pool_t*	buf_pool = buf_pool_from_bpage(bpage);
 	ut_ad(!buf_pool_mutex_own(buf_pool));
@@ -1076,28 +1084,27 @@ buf_flush_write_block_low(
 		break;
 	}
 
-	frame = buf_page_encrypt_before_write(bpage, frame, space_id);
+	frame = buf_page_encrypt_before_write(space, bpage, frame);
 
 	/* Disable use of double-write buffer for temporary tablespace.
 	Given the nature and load of temporary tablespace doublewrite buffer
 	adds an overhead during flushing. */
 
-	if (!srv_use_doublewrite_buf
-	    || buf_dblwr == NULL
-	    || srv_read_only_mode
-	    || atomic_writes) {
-
-		ut_ad(!srv_read_only_mode
-		      || fsp_is_system_temporary(bpage->id.space()));
+	if (is_temp || space->atomic_write_supported
+	    || !srv_use_doublewrite_buf
+	    || buf_dblwr == NULL) {
 
 		ulint	type = IORequest::WRITE | IORequest::DO_NOT_WAKE;
 
 		IORequest	request(type, bpage);
 
+		/* TODO: pass the tablespace to fil_io() */
 		fil_io(request,
 		       sync, bpage->id, bpage->size, 0, bpage->size.physical(),
-			frame, bpage);
+		       frame, bpage);
 	} else {
+		ut_ad(!srv_read_only_mode);
+
 		if (flush_type == BUF_FLUSH_SINGLE_PAGE) {
 			buf_dblwr_write_single_page(bpage, sync);
 		} else {
@@ -1111,12 +1118,27 @@ buf_flush_write_block_low(
 	are working on. */
 	if (sync) {
 		ut_ad(flush_type == BUF_FLUSH_SINGLE_PAGE);
-		fil_flush(bpage->id.space());
+		if (!is_temp) {
+			fil_flush(space);
+		}
 
+		/* The tablespace could already have been dropped,
+		because fil_io(request, sync) would already have
+		decremented the node->n_pending. However,
+		buf_page_io_complete() only needs to look up the
+		tablespace during read requests, not during writes. */
+		ut_ad(buf_page_get_io_fix(bpage) == BUF_IO_WRITE);
+#ifdef UNIV_DEBUG
+		dberr_t err =
+#endif
 		/* true means we want to evict this page from the
 		LRU list as well. */
 		buf_page_io_complete(bpage, true);
+
+		ut_ad(err == DB_SUCCESS);
 	}
+
+	fil_space_release_for_io(space);
 
 	/* Increment the counter of I/O operations used
 	for selecting LRU policy. */
@@ -1195,6 +1217,7 @@ buf_flush_page(
 		}
 
 		++buf_pool->n_flush[flush_type];
+		ut_ad(buf_pool->n_flush[flush_type] != 0);
 
 		mutex_exit(block_mutex);
 
@@ -1847,19 +1870,12 @@ buf_flush_batch(
 					counts  */
 {
 	ut_ad(flush_type == BUF_FLUSH_LRU || flush_type == BUF_FLUSH_LIST);
-
-#ifdef UNIV_DEBUG
-	{
-		dict_sync_check	check(true);
-
-		ut_ad(flush_type != BUF_FLUSH_LIST
-		      || !sync_check_iterate(check));
-	}
-#endif /* UNIV_DEBUG */
+	ut_ad(flush_type == BUF_FLUSH_LRU
+	      || !sync_check_iterate(dict_sync_check()));
 
 	buf_pool_mutex_enter(buf_pool);
 
-	ulint	count = 0;
+	ulint	count __attribute__((unused))= 0;
 
 	/* Note: The buffer pool mutex is released and reacquired within
 	the flush functions. */
@@ -2678,6 +2694,11 @@ pc_sleep_if_needed(
 	ulint		next_loop_time,
 	int64_t		sig_count)
 {
+	/* No sleep if we are cleaning the buffer pool during the shutdown
+	with everything else finished */
+	if (srv_shutdown_state == SRV_SHUTDOWN_FLUSH_PHASE)
+		return OS_SYNC_TIME_EXCEEDED;
+
 	ulint	cur_time = ut_time_ms();
 
 	if (next_loop_time > cur_time) {
@@ -3102,6 +3123,7 @@ DECLARE_THREAD(buf_flush_page_cleaner_coordinator)(
 			/*!< in: a dummy parameter required by
 			os_thread_create */
 {
+	my_thread_init();
 	ulint	next_loop_time = ut_time_ms() + 1000;
 	ulint	n_flushed = 0;
 	ulint	last_activity = srv_get_activity_count();
@@ -3130,8 +3152,6 @@ DECLARE_THREAD(buf_flush_page_cleaner_coordinator)(
 		" See the man page of setpriority().";
 	}
 #endif /* UNIV_LINUX */
-
-	buf_page_cleaner_is_active = true;
 
 	while (!srv_read_only_mode
 	       && srv_shutdown_state == SRV_SHUTDOWN_NONE
@@ -3460,7 +3480,6 @@ thread_exit:
 	buf_page_cleaner_is_active = false;
 
 	my_thread_end();
-
 	/* We count the number of threads in os_thread_exit(). A created
 	thread should always use that to exit and not use return() to exit. */
 	os_thread_exit();

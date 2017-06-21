@@ -38,68 +38,6 @@
 
 /*
 =============================================================================
-  HELPER FUNCTIONS
-=============================================================================
-*/
-
-static const char* item_name(Item *a, String *str)
-{
-  if (a->name)
-    return a->name;
-  str->length(0);
-  a->print(str, QT_ORDINARY);
-  return str->c_ptr_safe();
-}
-
-
-static void wrong_precision_error(uint errcode, Item *a,
-                                  ulonglong number, uint maximum)
-{
-  char buff[1024];
-  String buf(buff, sizeof(buff), system_charset_info);
-
-  my_error(errcode, MYF(0), number, item_name(a, &buf), maximum);
-}
-
-
-/**
-  Get precision and scale for a declaration
- 
-  return
-    0  ok
-    1  error
-*/
-
-bool get_length_and_scale(ulonglong length, ulonglong decimals,
-                          ulong *out_length, uint *out_decimals,
-                          uint max_precision, uint max_scale,
-                          Item *a)
-{
-  if (length > (ulonglong) max_precision)
-  {
-    wrong_precision_error(ER_TOO_BIG_PRECISION, a, length, max_precision);
-    return 1;
-  }
-  if (decimals > (ulonglong) max_scale)
-  {
-    wrong_precision_error(ER_TOO_BIG_SCALE, a, decimals, max_scale);
-    return 1;
-  }
-
-  *out_decimals=  (uint) decimals;
-  my_decimal_trim(&length, out_decimals);
-  *out_length=  (ulong) length;
-  
-  if (*out_length < *out_decimals)
-  {
-    my_error(ER_M_BIGGER_THAN_D, MYF(0), "");
-    return 1;
-  }
-  return 0;
-}
-
-/*
-=============================================================================
   LOCAL DECLARATIONS
 =============================================================================
 */
@@ -115,7 +53,8 @@ bool get_length_and_scale(ulonglong length, ulonglong decimals,
 class Create_native_func : public Create_func
 {
 public:
-  virtual Item *create_func(THD *thd, LEX_STRING name, List<Item> *item_list);
+  virtual Item *create_func(THD *thd, LEX_CSTRING *name,
+                            List<Item> *item_list);
 
   /**
     Builder method, with no arguments.
@@ -124,7 +63,7 @@ public:
     @param item_list The function parameters, none of which are named
     @return An item representing the function call
   */
-  virtual Item *create_native(THD *thd, LEX_STRING name,
+  virtual Item *create_native(THD *thd, LEX_CSTRING *name,
                               List<Item> *item_list) = 0;
 
 protected:
@@ -142,7 +81,8 @@ protected:
 class Create_func_arg0 : public Create_func
 {
 public:
-  virtual Item *create_func(THD *thd, LEX_STRING name, List<Item> *item_list);
+  virtual Item *create_func(THD *thd, LEX_CSTRING *name,
+                            List<Item> *item_list);
 
   /**
     Builder method, with no arguments.
@@ -166,7 +106,7 @@ protected:
 class Create_func_arg1 : public Create_func
 {
 public:
-  virtual Item *create_func(THD *thd, LEX_STRING name, List<Item> *item_list);
+  virtual Item *create_func(THD *thd, LEX_CSTRING *name, List<Item> *item_list);
 
   /**
     Builder method, with one argument.
@@ -191,7 +131,7 @@ protected:
 class Create_func_arg2 : public Create_func
 {
 public:
-  virtual Item *create_func(THD *thd, LEX_STRING name, List<Item> *item_list);
+  virtual Item *create_func(THD *thd, LEX_CSTRING *name, List<Item> *item_list);
 
   /**
     Builder method, with two arguments.
@@ -217,7 +157,7 @@ protected:
 class Create_func_arg3 : public Create_func
 {
 public:
-  virtual Item *create_func(THD *thd, LEX_STRING name, List<Item> *item_list);
+  virtual Item *create_func(THD *thd, LEX_CSTRING *name, List<Item> *item_list);
 
   /**
     Builder method, with three arguments.
@@ -244,7 +184,7 @@ protected:
 class Create_sp_func : public Create_qfunc
 {
 public:
-  virtual Item *create_with_db(THD *thd, LEX_STRING db, LEX_STRING name,
+  virtual Item *create_with_db(THD *thd, LEX_CSTRING *db, LEX_CSTRING *name,
                                bool use_explicit_name, List<Item> *item_list);
 
   static Create_sp_func s_singleton;
@@ -267,7 +207,7 @@ protected:
 class Create_func_no_geom : public Create_func
 {
 public:
-  virtual Item *create_func(THD *thd, LEX_STRING name, List<Item> *item_list);
+  virtual Item *create_func(THD *thd, LEX_CSTRING *name, List<Item> *item_list);
 
   /** Singleton. */
   static Create_func_no_geom s_singleton;
@@ -413,7 +353,7 @@ protected:
 class Create_func_atan : public Create_native_func
 {
 public:
-  virtual Item *create_native(THD *thd, LEX_STRING name, List<Item> *item_list);
+  virtual Item *create_native(THD *thd, LEX_CSTRING *name, List<Item> *item_list);
 
   static Create_func_atan s_singleton;
 
@@ -512,6 +452,19 @@ public:
 protected:
   Create_func_centroid() {}
   virtual ~Create_func_centroid() {}
+};
+
+
+class Create_func_chr : public Create_func_arg1
+{
+public:
+  virtual Item *create_1_arg(THD *thd, Item *arg1);
+
+  static Create_func_chr s_singleton;
+
+protected:
+  Create_func_chr() {}
+  virtual ~Create_func_chr() {}
 };
 
 
@@ -634,7 +587,7 @@ protected:
 class Create_func_concat : public Create_native_func
 {
 public:
-  virtual Item *create_native(THD *thd, LEX_STRING name, List<Item> *item_list);
+  virtual Item *create_native(THD *thd, LEX_CSTRING *name, List<Item> *item_list);
 
   static Create_func_concat s_singleton;
 
@@ -647,7 +600,7 @@ protected:
 class Create_func_concat_operator_oracle : public Create_native_func
 {
 public:
-  virtual Item *create_native(THD *thd, LEX_STRING name, List<Item> *item_list);
+  virtual Item *create_native(THD *thd, LEX_CSTRING *name, List<Item> *item_list);
 
   static Create_func_concat_operator_oracle s_singleton;
 
@@ -673,7 +626,7 @@ protected:
 class Create_func_concat_ws : public Create_native_func
 {
 public:
-  virtual Item *create_native(THD *thd, LEX_STRING name, List<Item> *item_list);
+  virtual Item *create_native(THD *thd, LEX_CSTRING *name, List<Item> *item_list);
 
   static Create_func_concat_ws s_singleton;
 
@@ -911,7 +864,7 @@ protected:
 class Create_func_des_decrypt : public Create_native_func
 {
 public:
-  virtual Item *create_native(THD *thd, LEX_STRING name, List<Item> *item_list);
+  virtual Item *create_native(THD *thd, LEX_CSTRING *name, List<Item> *item_list);
 
   static Create_func_des_decrypt s_singleton;
 
@@ -924,7 +877,7 @@ protected:
 class Create_func_des_encrypt : public Create_native_func
 {
 public:
-  virtual Item *create_native(THD *thd, LEX_STRING name, List<Item> *item_list);
+  virtual Item *create_native(THD *thd, LEX_CSTRING *name, List<Item> *item_list);
 
   static Create_func_des_encrypt s_singleton;
 
@@ -993,7 +946,7 @@ class Create_func_distance : public Create_func_arg2
 class Create_func_elt : public Create_native_func
 {
 public:
-  virtual Item *create_native(THD *thd, LEX_STRING name, List<Item> *item_list);
+  virtual Item *create_native(THD *thd, LEX_CSTRING *name, List<Item> *item_list);
 
   static Create_func_elt s_singleton;
 
@@ -1019,7 +972,7 @@ protected:
 class Create_func_encrypt : public Create_native_func
 {
 public:
-  virtual Item *create_native(THD *thd, LEX_STRING name, List<Item> *item_list);
+  virtual Item *create_native(THD *thd, LEX_CSTRING *name, List<Item> *item_list);
 
   static Create_func_encrypt s_singleton;
 
@@ -1115,7 +1068,7 @@ protected:
 class Create_func_export_set : public Create_native_func
 {
 public:
-  virtual Item *create_native(THD *thd, LEX_STRING name, List<Item> *item_list);
+  virtual Item *create_native(THD *thd, LEX_CSTRING *name, List<Item> *item_list);
 
   static Create_func_export_set s_singleton;
 
@@ -1143,7 +1096,7 @@ protected:
 class Create_func_field : public Create_native_func
 {
 public:
-  virtual Item *create_native(THD *thd, LEX_STRING name, List<Item> *item_list);
+  virtual Item *create_native(THD *thd, LEX_CSTRING *name, List<Item> *item_list);
 
   static Create_func_field s_singleton;
 
@@ -1182,7 +1135,7 @@ protected:
 class Create_func_format : public Create_native_func
 {
 public:
-  virtual Item *create_native(THD *thd, LEX_STRING name, List<Item> *item_list);
+  virtual Item *create_native(THD *thd, LEX_CSTRING *name, List<Item> *item_list);
 
   static Create_func_format s_singleton;
 
@@ -1234,7 +1187,7 @@ protected:
 class Create_func_from_unixtime : public Create_native_func
 {
 public:
-  virtual Item *create_native(THD *thd, LEX_STRING name, List<Item> *item_list);
+  virtual Item *create_native(THD *thd, LEX_CSTRING *name, List<Item> *item_list);
 
   static Create_func_from_unixtime s_singleton;
 
@@ -1248,7 +1201,7 @@ protected:
 class Create_func_geometry_from_text : public Create_native_func
 {
 public:
-  virtual Item *create_native(THD *thd, LEX_STRING name, List<Item> *item_list);
+  virtual Item *create_native(THD *thd, LEX_CSTRING *name, List<Item> *item_list);
 
   static Create_func_geometry_from_text s_singleton;
 
@@ -1263,7 +1216,7 @@ protected:
 class Create_func_geometry_from_wkb : public Create_native_func
 {
 public:
-  virtual Item *create_native(THD *thd, LEX_STRING name, List<Item> *item_list);
+  virtual Item *create_native(THD *thd, LEX_CSTRING *name, List<Item> *item_list);
 
   static Create_func_geometry_from_wkb s_singleton;
 
@@ -1278,7 +1231,7 @@ protected:
 class Create_func_geometry_from_json : public Create_native_func
 {
 public:
-  virtual Item *create_native(THD *thd, LEX_STRING name, List<Item> *item_list);
+  virtual Item *create_native(THD *thd, LEX_CSTRING *name, List<Item> *item_list);
 
   static Create_func_geometry_from_json s_singleton;
 
@@ -1291,7 +1244,7 @@ protected:
 class Create_func_as_geojson : public Create_native_func
 {
 public:
-  virtual Item *create_native(THD *thd, LEX_STRING name, List<Item> *item_list);
+  virtual Item *create_native(THD *thd, LEX_CSTRING *name, List<Item> *item_list);
 
   static Create_func_as_geojson s_singleton;
 
@@ -1378,7 +1331,7 @@ protected:
 class Create_func_greatest : public Create_native_func
 {
 public:
-  virtual Item *create_native(THD *thd, LEX_STRING name, List<Item> *item_list);
+  virtual Item *create_native(THD *thd, LEX_CSTRING *name, List<Item> *item_list);
 
   static Create_func_greatest s_singleton;
 
@@ -1804,7 +1757,7 @@ protected:
 class Create_func_json_detailed: public Create_native_func
 {
 public:
-  virtual Item *create_native(THD *thd, LEX_STRING name, List<Item> *item_list);
+  virtual Item *create_native(THD *thd, LEX_CSTRING *name, List<Item> *item_list);
 
   static Create_func_json_detailed s_singleton;
 
@@ -1869,7 +1822,7 @@ protected:
 class Create_func_json_keys: public Create_native_func
 {
 public:
-  virtual Item *create_native(THD *thd, LEX_STRING name, List<Item> *item_list);
+  virtual Item *create_native(THD *thd, LEX_CSTRING *name, List<Item> *item_list);
 
   static Create_func_json_keys s_singleton;
 
@@ -1882,7 +1835,7 @@ protected:
 class Create_func_json_contains: public Create_native_func
 {
 public:
-  virtual Item *create_native(THD *thd, LEX_STRING name, List<Item> *item_list);
+  virtual Item *create_native(THD *thd, LEX_CSTRING *name, List<Item> *item_list);
 
   static Create_func_json_contains s_singleton;
 
@@ -1895,7 +1848,7 @@ protected:
 class Create_func_json_contains_path : public Create_native_func
 {
 public:
-  virtual Item *create_native(THD *thd, LEX_STRING name, List<Item> *item_list);
+  virtual Item *create_native(THD *thd, LEX_CSTRING *name, List<Item> *item_list);
 
   static Create_func_json_contains_path s_singleton;
 
@@ -1908,7 +1861,7 @@ protected:
 class Create_func_json_extract : public Create_native_func
 {
 public:
-  virtual Item *create_native(THD *thd, LEX_STRING name, List<Item> *item_list);
+  virtual Item *create_native(THD *thd, LEX_CSTRING *name, List<Item> *item_list);
 
   static Create_func_json_extract s_singleton;
 
@@ -1921,7 +1874,7 @@ protected:
 class Create_func_json_search : public Create_native_func
 {
 public:
-  virtual Item *create_native(THD *thd, LEX_STRING name, List<Item> *item_list);
+  virtual Item *create_native(THD *thd, LEX_CSTRING *name, List<Item> *item_list);
 
   static Create_func_json_search s_singleton;
 
@@ -1934,7 +1887,7 @@ protected:
 class Create_func_json_array : public Create_native_func
 {
 public:
-  virtual Item *create_native(THD *thd, LEX_STRING name, List<Item> *item_list);
+  virtual Item *create_native(THD *thd, LEX_CSTRING *name, List<Item> *item_list);
 
   static Create_func_json_array s_singleton;
 
@@ -1947,7 +1900,7 @@ protected:
 class Create_func_json_array_append : public Create_native_func
 {
 public:
-  virtual Item *create_native(THD *thd, LEX_STRING name, List<Item> *item_list);
+  virtual Item *create_native(THD *thd, LEX_CSTRING *name, List<Item> *item_list);
 
   static Create_func_json_array_append s_singleton;
 
@@ -1960,7 +1913,7 @@ protected:
 class Create_func_json_array_insert : public Create_native_func
 {
 public:
-  virtual Item *create_native(THD *thd, LEX_STRING name, List<Item> *item_list);
+  virtual Item *create_native(THD *thd, LEX_CSTRING *name, List<Item> *item_list);
 
   static Create_func_json_array_insert s_singleton;
 
@@ -1973,7 +1926,7 @@ protected:
 class Create_func_json_insert : public Create_native_func
 {
 public:
-  virtual Item *create_native(THD *thd, LEX_STRING name, List<Item> *item_list);
+  virtual Item *create_native(THD *thd, LEX_CSTRING *name, List<Item> *item_list);
 
   static Create_func_json_insert s_singleton;
 
@@ -1986,7 +1939,7 @@ protected:
 class Create_func_json_set : public Create_native_func
 {
 public:
-  virtual Item *create_native(THD *thd, LEX_STRING name, List<Item> *item_list);
+  virtual Item *create_native(THD *thd, LEX_CSTRING *name, List<Item> *item_list);
 
   static Create_func_json_set s_singleton;
 
@@ -1999,7 +1952,7 @@ protected:
 class Create_func_json_replace : public Create_native_func
 {
 public:
-  virtual Item *create_native(THD *thd, LEX_STRING name, List<Item> *item_list);
+  virtual Item *create_native(THD *thd, LEX_CSTRING *name, List<Item> *item_list);
 
   static Create_func_json_replace s_singleton;
 
@@ -2012,7 +1965,7 @@ protected:
 class Create_func_json_remove : public Create_native_func
 {
 public:
-  virtual Item *create_native(THD *thd, LEX_STRING name, List<Item> *item_list);
+  virtual Item *create_native(THD *thd, LEX_CSTRING *name, List<Item> *item_list);
 
   static Create_func_json_remove s_singleton;
 
@@ -2025,7 +1978,7 @@ protected:
 class Create_func_json_object : public Create_native_func
 {
 public:
-  virtual Item *create_native(THD *thd, LEX_STRING name, List<Item> *item_list);
+  virtual Item *create_native(THD *thd, LEX_CSTRING *name, List<Item> *item_list);
 
   static Create_func_json_object s_singleton;
 
@@ -2038,7 +1991,7 @@ protected:
 class Create_func_json_length : public Create_native_func
 {
 public:
-  virtual Item *create_native(THD *thd, LEX_STRING name, List<Item> *item_list);
+  virtual Item *create_native(THD *thd, LEX_CSTRING *name, List<Item> *item_list);
 
   static Create_func_json_length s_singleton;
 
@@ -2051,7 +2004,7 @@ protected:
 class Create_func_json_merge : public Create_native_func
 {
 public:
-  virtual Item *create_native(THD *thd, LEX_STRING name, List<Item> *item_list);
+  virtual Item *create_native(THD *thd, LEX_CSTRING *name, List<Item> *item_list);
 
   static Create_func_json_merge s_singleton;
 
@@ -2103,7 +2056,7 @@ protected:
 class Create_func_last_insert_id : public Create_native_func
 {
 public:
-  virtual Item *create_native(THD *thd, LEX_STRING name, List<Item> *item_list);
+  virtual Item *create_native(THD *thd, LEX_CSTRING *name, List<Item> *item_list);
 
   static Create_func_last_insert_id s_singleton;
 
@@ -2129,7 +2082,7 @@ protected:
 class Create_func_least : public Create_native_func
 {
 public:
-  virtual Item *create_native(THD *thd, LEX_STRING name, List<Item> *item_list);
+  virtual Item *create_native(THD *thd, LEX_CSTRING *name, List<Item> *item_list);
 
   static Create_func_least s_singleton;
 
@@ -2149,6 +2102,18 @@ public:
 protected:
   Create_func_length() {}
   virtual ~Create_func_length() {}
+};
+
+class Create_func_octet_length : public Create_func_arg1
+{
+public:
+  virtual Item *create_1_arg(THD *thd, Item *arg1);
+
+  static Create_func_octet_length s_singleton;
+
+protected:
+  Create_func_octet_length() {}
+  virtual ~Create_func_octet_length() {}
 };
 
 
@@ -2209,7 +2174,7 @@ protected:
 class Create_func_locate : public Create_native_func
 {
 public:
-  virtual Item *create_native(THD *thd, LEX_STRING name, List<Item> *item_list);
+  virtual Item *create_native(THD *thd, LEX_CSTRING *name, List<Item> *item_list);
 
   static Create_func_locate s_singleton;
 
@@ -2222,7 +2187,7 @@ protected:
 class Create_func_log : public Create_native_func
 {
 public:
-  virtual Item *create_native(THD *thd, LEX_STRING name, List<Item> *item_list);
+  virtual Item *create_native(THD *thd, LEX_CSTRING *name, List<Item> *item_list);
 
   static Create_func_log s_singleton;
 
@@ -2258,10 +2223,11 @@ protected:
 };
 
 
-class Create_func_lpad : public Create_func_arg3
+class Create_func_lpad : public Create_native_func
 {
 public:
-  virtual Item *create_3_arg(THD *thd, Item *arg1, Item *arg2, Item *arg3);
+  virtual Item *create_native(THD *thd, LEX_CSTRING *name,
+                              List<Item> *item_list);
 
   static Create_func_lpad s_singleton;
 
@@ -2313,7 +2279,7 @@ protected:
 class Create_func_make_set : public Create_native_func
 {
 public:
-  virtual Item *create_native(THD *thd, LEX_STRING name, List<Item> *item_list);
+  virtual Item *create_native(THD *thd, LEX_CSTRING *name, List<Item> *item_list);
 
   static Create_func_make_set s_singleton;
 
@@ -2326,7 +2292,7 @@ protected:
 class Create_func_master_pos_wait : public Create_native_func
 {
 public:
-  virtual Item *create_native(THD *thd, LEX_STRING name, List<Item> *item_list);
+  virtual Item *create_native(THD *thd, LEX_CSTRING *name, List<Item> *item_list);
 
   static Create_func_master_pos_wait s_singleton;
 
@@ -2339,7 +2305,7 @@ protected:
 class Create_func_master_gtid_wait : public Create_native_func
 {
 public:
-  virtual Item *create_native(THD *thd, LEX_STRING name, List<Item> *item_list);
+  virtual Item *create_native(THD *thd, LEX_CSTRING *name, List<Item> *item_list);
 
   static Create_func_master_gtid_wait s_singleton;
 
@@ -2635,7 +2601,7 @@ protected:
 class Create_func_rand : public Create_native_func
 {
 public:
-  virtual Item *create_native(THD *thd, LEX_STRING name, List<Item> *item_list);
+  virtual Item *create_native(THD *thd, LEX_CSTRING *name, List<Item> *item_list);
 
   static Create_func_rand s_singleton;
 
@@ -2674,7 +2640,7 @@ protected:
 class Create_func_round : public Create_native_func
 {
 public:
-  virtual Item *create_native(THD *thd, LEX_STRING name, List<Item> *item_list);
+  virtual Item *create_native(THD *thd, LEX_CSTRING *name, List<Item> *item_list);
 
   static Create_func_round s_singleton;
 
@@ -2684,10 +2650,11 @@ protected:
 };
 
 
-class Create_func_rpad : public Create_func_arg3
+class Create_func_rpad : public Create_native_func
 {
 public:
-  virtual Item *create_3_arg(THD *thd, Item *arg1, Item *arg2, Item *arg3);
+  virtual Item *create_native(THD *thd, LEX_CSTRING *name,
+                              List<Item> *item_list);
 
   static Create_func_rpad s_singleton;
 
@@ -3069,7 +3036,7 @@ protected:
 class Create_func_unix_timestamp : public Create_native_func
 {
 public:
-  virtual Item *create_native(THD *thd, LEX_STRING name, List<Item> *item_list);
+  virtual Item *create_native(THD *thd, LEX_CSTRING *name, List<Item> *item_list);
 
   static Create_func_unix_timestamp s_singleton;
 
@@ -3231,7 +3198,7 @@ protected:
 class Create_func_year_week : public Create_native_func
 {
 public:
-  virtual Item *create_native(THD *thd, LEX_STRING name, List<Item> *item_list);
+  virtual Item *create_native(THD *thd, LEX_CSTRING *name, List<Item> *item_list);
 
   static Create_func_year_week s_singleton;
 
@@ -3275,7 +3242,7 @@ Create_func_no_geom Create_func_no_geom::s_singleton;
 
 Item*
 Create_func_no_geom::create_func(THD * /* unused */,
-                            LEX_STRING /* unused */,
+                            LEX_CSTRING /* unused */,
                             List<Item> * /* unused */)
 {
   /* FIXME: error message can't be translated. */
@@ -3287,9 +3254,9 @@ Create_func_no_geom::create_func(THD * /* unused */,
 
 
 Item*
-Create_qfunc::create_func(THD *thd, LEX_STRING name, List<Item> *item_list)
+Create_qfunc::create_func(THD *thd, LEX_CSTRING *name, List<Item> *item_list)
 {
-  LEX_STRING db;
+  LEX_CSTRING db;
 
   if (! thd->db && ! thd->lex->sphead)
   {
@@ -3305,14 +3272,14 @@ Create_qfunc::create_func(THD *thd, LEX_STRING name, List<Item> *item_list)
       the case when a default database exist, see Create_sp_func::create().
     */
     my_error(ER_SP_DOES_NOT_EXIST, MYF(0),
-             "FUNCTION", name.str);
+             "FUNCTION", name->str);
     return NULL;
   }
 
   if (thd->lex->copy_db_to(&db.str, &db.length))
     return NULL;
 
-  return create_with_db(thd, db, name, false, item_list);
+  return create_with_db(thd, &db, name, false, item_list);
 }
 
 
@@ -3320,9 +3287,9 @@ Create_qfunc::create_func(THD *thd, LEX_STRING name, List<Item> *item_list)
 Create_udf_func Create_udf_func::s_singleton;
 
 Item*
-Create_udf_func::create_func(THD *thd, LEX_STRING name, List<Item> *item_list)
+Create_udf_func::create_func(THD *thd, LEX_CSTRING *name, List<Item> *item_list)
 {
-  udf_func *udf= find_udf(name.str, name.length);
+  udf_func *udf= find_udf(name->str, name->length);
   DBUG_ASSERT(udf);
   return create(thd, udf, item_list);
 }
@@ -3430,7 +3397,7 @@ Create_udf_func::create(THD *thd, udf_func *udf, List<Item> *item_list)
 Create_sp_func Create_sp_func::s_singleton;
 
 Item*
-Create_sp_func::create_with_db(THD *thd, LEX_STRING db, LEX_STRING name,
+Create_sp_func::create_with_db(THD *thd, LEX_CSTRING *db, LEX_CSTRING *name,
                                bool use_explicit_name, List<Item> *item_list)
 {
   int arg_count= 0;
@@ -3449,7 +3416,7 @@ Create_sp_func::create_with_db(THD *thd, LEX_STRING db, LEX_STRING name,
       because it can refer to a User Defined Function call.
       For a Stored Function however, this has no semantic.
     */
-    my_error(ER_WRONG_PARAMETERS_TO_STORED_FCT, MYF(0), name.str);
+    my_error(ER_WRONG_PARAMETERS_TO_STORED_FCT, MYF(0), name->str);
     return NULL;
   }
 
@@ -3471,11 +3438,11 @@ Create_sp_func::create_with_db(THD *thd, LEX_STRING db, LEX_STRING name,
 
 
 Item*
-Create_native_func::create_func(THD *thd, LEX_STRING name, List<Item> *item_list)
+Create_native_func::create_func(THD *thd, LEX_CSTRING *name, List<Item> *item_list)
 {
   if (has_named_parameters(item_list))
   {
-    my_error(ER_WRONG_PARAMETERS_TO_NATIVE_FCT, MYF(0), name.str);
+    my_error(ER_WRONG_PARAMETERS_TO_NATIVE_FCT, MYF(0), name->str);
     return NULL;
   }
 
@@ -3484,7 +3451,7 @@ Create_native_func::create_func(THD *thd, LEX_STRING name, List<Item> *item_list
 
 
 Item*
-Create_func_arg0::create_func(THD *thd, LEX_STRING name, List<Item> *item_list)
+Create_func_arg0::create_func(THD *thd, LEX_CSTRING *name, List<Item> *item_list)
 {
   int arg_count= 0;
 
@@ -3493,7 +3460,7 @@ Create_func_arg0::create_func(THD *thd, LEX_STRING name, List<Item> *item_list)
 
   if (arg_count != 0)
   {
-    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name.str);
+    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name->str);
     return NULL;
   }
 
@@ -3502,7 +3469,7 @@ Create_func_arg0::create_func(THD *thd, LEX_STRING name, List<Item> *item_list)
 
 
 Item*
-Create_func_arg1::create_func(THD *thd, LEX_STRING name, List<Item> *item_list)
+Create_func_arg1::create_func(THD *thd, LEX_CSTRING *name, List<Item> *item_list)
 {
   int arg_count= 0;
 
@@ -3511,7 +3478,7 @@ Create_func_arg1::create_func(THD *thd, LEX_STRING name, List<Item> *item_list)
 
   if (arg_count != 1)
   {
-    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name.str);
+    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name->str);
     return NULL;
   }
 
@@ -3519,7 +3486,7 @@ Create_func_arg1::create_func(THD *thd, LEX_STRING name, List<Item> *item_list)
 
   if (! param_1->is_autogenerated_name)
   {
-    my_error(ER_WRONG_PARAMETERS_TO_NATIVE_FCT, MYF(0), name.str);
+    my_error(ER_WRONG_PARAMETERS_TO_NATIVE_FCT, MYF(0), name->str);
     return NULL;
   }
 
@@ -3528,7 +3495,7 @@ Create_func_arg1::create_func(THD *thd, LEX_STRING name, List<Item> *item_list)
 
 
 Item*
-Create_func_arg2::create_func(THD *thd, LEX_STRING name, List<Item> *item_list)
+Create_func_arg2::create_func(THD *thd, LEX_CSTRING *name, List<Item> *item_list)
 {
   int arg_count= 0;
 
@@ -3537,7 +3504,7 @@ Create_func_arg2::create_func(THD *thd, LEX_STRING name, List<Item> *item_list)
 
   if (arg_count != 2)
   {
-    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name.str);
+    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name->str);
     return NULL;
   }
 
@@ -3547,7 +3514,7 @@ Create_func_arg2::create_func(THD *thd, LEX_STRING name, List<Item> *item_list)
   if (   (! param_1->is_autogenerated_name)
       || (! param_2->is_autogenerated_name))
   {
-    my_error(ER_WRONG_PARAMETERS_TO_NATIVE_FCT, MYF(0), name.str);
+    my_error(ER_WRONG_PARAMETERS_TO_NATIVE_FCT, MYF(0), name->str);
     return NULL;
   }
 
@@ -3556,7 +3523,7 @@ Create_func_arg2::create_func(THD *thd, LEX_STRING name, List<Item> *item_list)
 
 
 Item*
-Create_func_arg3::create_func(THD *thd, LEX_STRING name, List<Item> *item_list)
+Create_func_arg3::create_func(THD *thd, LEX_CSTRING *name, List<Item> *item_list)
 {
   int arg_count= 0;
 
@@ -3565,7 +3532,7 @@ Create_func_arg3::create_func(THD *thd, LEX_STRING name, List<Item> *item_list)
 
   if (arg_count != 3)
   {
-    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name.str);
+    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name->str);
     return NULL;
   }
 
@@ -3577,7 +3544,7 @@ Create_func_arg3::create_func(THD *thd, LEX_STRING name, List<Item> *item_list)
       || (! param_2->is_autogenerated_name)
       || (! param_3->is_autogenerated_name))
   {
-    my_error(ER_WRONG_PARAMETERS_TO_NATIVE_FCT, MYF(0), name.str);
+    my_error(ER_WRONG_PARAMETERS_TO_NATIVE_FCT, MYF(0), name->str);
     return NULL;
   }
 
@@ -3675,7 +3642,7 @@ Create_func_asin::create_1_arg(THD *thd, Item *arg1)
 Create_func_atan Create_func_atan::s_singleton;
 
 Item*
-Create_func_atan::create_native(THD *thd, LEX_STRING name,
+Create_func_atan::create_native(THD *thd, LEX_CSTRING *name,
                                 List<Item> *item_list)
 {
   Item* func= NULL;
@@ -3700,7 +3667,7 @@ Create_func_atan::create_native(THD *thd, LEX_STRING name,
   }
   default:
   {
-    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name.str);
+    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name->str);
     break;
   }
   }
@@ -3784,6 +3751,16 @@ Create_func_centroid::create_1_arg(THD *thd, Item *arg1)
 }
 
 
+Create_func_chr Create_func_chr::s_singleton;
+
+Item*
+Create_func_chr::create_1_arg(THD *thd, Item *arg1)
+{
+  CHARSET_INFO *cs_db= thd->variables.collation_database;
+  return new (thd->mem_root) Item_func_chr(thd, arg1, cs_db);
+}
+
+
 Create_func_convexhull Create_func_convexhull::s_singleton;
 
 Item*
@@ -3856,7 +3833,7 @@ Create_func_dyncol_json::create_1_arg(THD *thd, Item *arg1)
 Create_func_concat Create_func_concat::s_singleton;
 
 Item*
-Create_func_concat::create_native(THD *thd, LEX_STRING name,
+Create_func_concat::create_native(THD *thd, LEX_CSTRING *name,
                                   List<Item> *item_list)
 {
   int arg_count= 0;
@@ -3866,7 +3843,7 @@ Create_func_concat::create_native(THD *thd, LEX_STRING name,
 
   if (arg_count < 1)
   {
-    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name.str);
+    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name->str);
     return NULL;
   }
 
@@ -3879,7 +3856,7 @@ Create_func_concat_operator_oracle
   Create_func_concat_operator_oracle::s_singleton;
 
 Item*
-Create_func_concat_operator_oracle::create_native(THD *thd, LEX_STRING name,
+Create_func_concat_operator_oracle::create_native(THD *thd, LEX_CSTRING *name,
                                                   List<Item> *item_list)
 {
   int arg_count= 0;
@@ -3889,7 +3866,7 @@ Create_func_concat_operator_oracle::create_native(THD *thd, LEX_STRING name,
 
   if (arg_count < 1)
   {
-    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name.str);
+    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name->str);
     return NULL;
   }
 
@@ -3907,7 +3884,7 @@ Create_func_decode_histogram::create_2_arg(THD *thd, Item *arg1, Item *arg2)
 Create_func_concat_ws Create_func_concat_ws::s_singleton;
 
 Item*
-Create_func_concat_ws::create_native(THD *thd, LEX_STRING name,
+Create_func_concat_ws::create_native(THD *thd, LEX_CSTRING *name,
                                      List<Item> *item_list)
 {
   int arg_count= 0;
@@ -3918,7 +3895,7 @@ Create_func_concat_ws::create_native(THD *thd, LEX_STRING name,
   /* "WS" stands for "With Separator": this function takes 2+ arguments */
   if (arg_count < 2)
   {
-    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name.str);
+    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name->str);
     return NULL;
   }
 
@@ -4103,7 +4080,7 @@ Create_func_degrees::create_1_arg(THD *thd, Item *arg1)
 Create_func_des_decrypt Create_func_des_decrypt::s_singleton;
 
 Item*
-Create_func_des_decrypt::create_native(THD *thd, LEX_STRING name,
+Create_func_des_decrypt::create_native(THD *thd, LEX_CSTRING *name,
                                        List<Item> *item_list)
 {
   Item *func= NULL;
@@ -4128,7 +4105,7 @@ Create_func_des_decrypt::create_native(THD *thd, LEX_STRING name,
   }
   default:
   {
-    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name.str);
+    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name->str);
     break;
   }
   }
@@ -4140,7 +4117,7 @@ Create_func_des_decrypt::create_native(THD *thd, LEX_STRING name,
 Create_func_des_encrypt Create_func_des_encrypt::s_singleton;
 
 Item*
-Create_func_des_encrypt::create_native(THD *thd, LEX_STRING name,
+Create_func_des_encrypt::create_native(THD *thd, LEX_CSTRING *name,
                                        List<Item> *item_list)
 {
   Item *func= NULL;
@@ -4165,7 +4142,7 @@ Create_func_des_encrypt::create_native(THD *thd, LEX_STRING name,
   }
   default:
   {
-    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name.str);
+    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name->str);
     break;
   }
   }
@@ -4219,7 +4196,7 @@ Create_func_distance::create_2_arg(THD *thd, Item *arg1, Item *arg2)
 Create_func_elt Create_func_elt::s_singleton;
 
 Item*
-Create_func_elt::create_native(THD *thd, LEX_STRING name,
+Create_func_elt::create_native(THD *thd, LEX_CSTRING *name,
                                List<Item> *item_list)
 {
   int arg_count= 0;
@@ -4229,7 +4206,7 @@ Create_func_elt::create_native(THD *thd, LEX_STRING name,
 
   if (arg_count < 2)
   {
-    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name.str);
+    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name->str);
     return NULL;
   }
 
@@ -4249,7 +4226,7 @@ Create_func_encode::create_2_arg(THD *thd, Item *arg1, Item *arg2)
 Create_func_encrypt Create_func_encrypt::s_singleton;
 
 Item*
-Create_func_encrypt::create_native(THD *thd, LEX_STRING name,
+Create_func_encrypt::create_native(THD *thd, LEX_CSTRING *name,
                                    List<Item> *item_list)
 {
   Item *func= NULL;
@@ -4275,7 +4252,7 @@ Create_func_encrypt::create_native(THD *thd, LEX_STRING name,
   }
   default:
   {
-    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name.str);
+    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name->str);
     break;
   }
   }
@@ -4350,7 +4327,7 @@ Create_func_exp::create_1_arg(THD *thd, Item *arg1)
 Create_func_export_set Create_func_export_set::s_singleton;
 
 Item*
-Create_func_export_set::create_native(THD *thd, LEX_STRING name,
+Create_func_export_set::create_native(THD *thd, LEX_CSTRING *name,
                                       List<Item> *item_list)
 {
   Item *func= NULL;
@@ -4391,7 +4368,7 @@ Create_func_export_set::create_native(THD *thd, LEX_STRING name,
   }
   default:
   {
-    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name.str);
+    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name->str);
     break;
   }
   }
@@ -4415,7 +4392,7 @@ Create_func_exteriorring::create_1_arg(THD *thd, Item *arg1)
 Create_func_field Create_func_field::s_singleton;
 
 Item*
-Create_func_field::create_native(THD *thd, LEX_STRING name,
+Create_func_field::create_native(THD *thd, LEX_CSTRING *name,
                                  List<Item> *item_list)
 {
   int arg_count= 0;
@@ -4425,7 +4402,7 @@ Create_func_field::create_native(THD *thd, LEX_STRING name,
 
   if (arg_count < 2)
   {
-    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name.str);
+    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name->str);
     return NULL;
   }
 
@@ -4454,7 +4431,7 @@ Create_func_floor::create_1_arg(THD *thd, Item *arg1)
 Create_func_format Create_func_format::s_singleton;
 
 Item*
-Create_func_format::create_native(THD *thd, LEX_STRING name,
+Create_func_format::create_native(THD *thd, LEX_CSTRING *name,
                                   List<Item> *item_list)
 {
   Item *func= NULL;
@@ -4477,7 +4454,7 @@ Create_func_format::create_native(THD *thd, LEX_STRING name,
     break;
   }
   default:
-    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name.str);
+    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name->str);
     break;
   }
 
@@ -4519,7 +4496,7 @@ Create_func_from_days::create_1_arg(THD *thd, Item *arg1)
 Create_func_from_unixtime Create_func_from_unixtime::s_singleton;
 
 Item*
-Create_func_from_unixtime::create_native(THD *thd, LEX_STRING name,
+Create_func_from_unixtime::create_native(THD *thd, LEX_CSTRING *name,
                                          List<Item> *item_list)
 {
   Item *func= NULL;
@@ -4545,7 +4522,7 @@ Create_func_from_unixtime::create_native(THD *thd, LEX_STRING name,
   }
   default:
   {
-    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name.str);
+    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name->str);
     break;
   }
   }
@@ -4558,7 +4535,7 @@ Create_func_from_unixtime::create_native(THD *thd, LEX_STRING name,
 Create_func_geometry_from_text Create_func_geometry_from_text::s_singleton;
 
 Item*
-Create_func_geometry_from_text::create_native(THD *thd, LEX_STRING name,
+Create_func_geometry_from_text::create_native(THD *thd, LEX_CSTRING *name,
                                               List<Item> *item_list)
 {
   Item *func= NULL;
@@ -4584,7 +4561,7 @@ Create_func_geometry_from_text::create_native(THD *thd, LEX_STRING name,
   }
   default:
   {
-    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name.str);
+    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name->str);
     break;
   }
   }
@@ -4598,7 +4575,7 @@ Create_func_geometry_from_text::create_native(THD *thd, LEX_STRING name,
 Create_func_geometry_from_wkb Create_func_geometry_from_wkb::s_singleton;
 
 Item*
-Create_func_geometry_from_wkb::create_native(THD *thd, LEX_STRING name,
+Create_func_geometry_from_wkb::create_native(THD *thd, LEX_CSTRING *name,
                                              List<Item> *item_list)
 {
   Item *func= NULL;
@@ -4624,7 +4601,7 @@ Create_func_geometry_from_wkb::create_native(THD *thd, LEX_STRING name,
   }
   default:
   {
-    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name.str);
+    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name->str);
     break;
   }
   }
@@ -4638,7 +4615,7 @@ Create_func_geometry_from_wkb::create_native(THD *thd, LEX_STRING name,
 Create_func_geometry_from_json Create_func_geometry_from_json::s_singleton;
 
 Item*
-Create_func_geometry_from_json::create_native(THD *thd, LEX_STRING name,
+Create_func_geometry_from_json::create_native(THD *thd, LEX_CSTRING *name,
                                              List<Item> *item_list)
 {
   Item *func= NULL;
@@ -4673,7 +4650,7 @@ Create_func_geometry_from_json::create_native(THD *thd, LEX_STRING name,
   }
   default:
   {
-    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name.str);
+    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name->str);
     break;
   }
   }
@@ -4685,7 +4662,7 @@ Create_func_geometry_from_json::create_native(THD *thd, LEX_STRING name,
 Create_func_as_geojson Create_func_as_geojson::s_singleton;
 
 Item*
-Create_func_as_geojson::create_native(THD *thd, LEX_STRING name,
+Create_func_as_geojson::create_native(THD *thd, LEX_CSTRING *name,
                                              List<Item> *item_list)
 {
   Item *func= NULL;
@@ -4719,7 +4696,7 @@ Create_func_as_geojson::create_native(THD *thd, LEX_STRING name,
   }
   default:
   {
-    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name.str);
+    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name->str);
     break;
   }
   }
@@ -4788,7 +4765,7 @@ Create_func_glength::create_1_arg(THD *thd, Item *arg1)
 Create_func_greatest Create_func_greatest::s_singleton;
 
 Item*
-Create_func_greatest::create_native(THD *thd, LEX_STRING name,
+Create_func_greatest::create_native(THD *thd, LEX_CSTRING *name,
                                     List<Item> *item_list)
 {
   int arg_count= 0;
@@ -4798,7 +4775,7 @@ Create_func_greatest::create_native(THD *thd, LEX_STRING name,
 
   if (arg_count < 2)
   {
-    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name.str);
+    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name->str);
     return NULL;
   }
 
@@ -5080,7 +5057,7 @@ Create_func_json_exists::create_2_arg(THD *thd, Item *arg1, Item *arg2)
 Create_func_json_detailed Create_func_json_detailed::s_singleton;
 
 Item*
-Create_func_json_detailed::create_native(THD *thd, LEX_STRING name,
+Create_func_json_detailed::create_native(THD *thd, LEX_CSTRING *name,
                                      List<Item> *item_list)
 {
   Item *func= NULL;
@@ -5091,7 +5068,7 @@ Create_func_json_detailed::create_native(THD *thd, LEX_STRING name,
 
   if (arg_count < 1 || arg_count > 2 /* json_doc, [path]...*/)
   {
-    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name.str);
+    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name->str);
   }
   else
   {
@@ -5197,7 +5174,7 @@ Create_func_last_day::create_1_arg(THD *thd, Item *arg1)
 Create_func_json_array Create_func_json_array::s_singleton;
 
 Item*
-Create_func_json_array::create_native(THD *thd, LEX_STRING name,
+Create_func_json_array::create_native(THD *thd, LEX_CSTRING *name,
                                       List<Item> *item_list)
 {
   Item *func;
@@ -5218,7 +5195,7 @@ Create_func_json_array::create_native(THD *thd, LEX_STRING name,
 Create_func_json_array_append Create_func_json_array_append::s_singleton;
 
 Item*
-Create_func_json_array_append::create_native(THD *thd, LEX_STRING name,
+Create_func_json_array_append::create_native(THD *thd, LEX_CSTRING *name,
                                                  List<Item> *item_list)
 {
   Item *func= NULL;
@@ -5229,7 +5206,7 @@ Create_func_json_array_append::create_native(THD *thd, LEX_STRING name,
 
   if (arg_count < 3 || (arg_count & 1) == 0 /*is even*/)
   {
-    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name.str);
+    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name->str);
   }
   else
   {
@@ -5243,7 +5220,7 @@ Create_func_json_array_append::create_native(THD *thd, LEX_STRING name,
 Create_func_json_array_insert Create_func_json_array_insert::s_singleton;
 
 Item*
-Create_func_json_array_insert::create_native(THD *thd, LEX_STRING name,
+Create_func_json_array_insert::create_native(THD *thd, LEX_CSTRING *name,
                                                  List<Item> *item_list)
 {
   Item *func= NULL;
@@ -5254,7 +5231,7 @@ Create_func_json_array_insert::create_native(THD *thd, LEX_STRING name,
 
   if (arg_count < 3 || (arg_count & 1) == 0 /*is even*/)
   {
-    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name.str);
+    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name->str);
   }
   else
   {
@@ -5268,7 +5245,7 @@ Create_func_json_array_insert::create_native(THD *thd, LEX_STRING name,
 Create_func_json_insert Create_func_json_insert::s_singleton;
 
 Item*
-Create_func_json_insert::create_native(THD *thd, LEX_STRING name,
+Create_func_json_insert::create_native(THD *thd, LEX_CSTRING *name,
                                                  List<Item> *item_list)
 {
   Item *func= NULL;
@@ -5279,7 +5256,7 @@ Create_func_json_insert::create_native(THD *thd, LEX_STRING name,
 
   if (arg_count < 3 || (arg_count & 1) == 0 /*is even*/)
   {
-    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name.str);
+    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name->str);
   }
   else
   {
@@ -5294,7 +5271,7 @@ Create_func_json_insert::create_native(THD *thd, LEX_STRING name,
 Create_func_json_set Create_func_json_set::s_singleton;
 
 Item*
-Create_func_json_set::create_native(THD *thd, LEX_STRING name,
+Create_func_json_set::create_native(THD *thd, LEX_CSTRING *name,
                                     List<Item> *item_list)
 {
   Item *func= NULL;
@@ -5305,7 +5282,7 @@ Create_func_json_set::create_native(THD *thd, LEX_STRING name,
 
   if (arg_count < 3 || (arg_count & 1) == 0 /*is even*/)
   {
-    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name.str);
+    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name->str);
   }
   else
   {
@@ -5320,7 +5297,7 @@ Create_func_json_set::create_native(THD *thd, LEX_STRING name,
 Create_func_json_replace Create_func_json_replace::s_singleton;
 
 Item*
-Create_func_json_replace::create_native(THD *thd, LEX_STRING name,
+Create_func_json_replace::create_native(THD *thd, LEX_CSTRING *name,
                                         List<Item> *item_list)
 {
   Item *func= NULL;
@@ -5331,7 +5308,7 @@ Create_func_json_replace::create_native(THD *thd, LEX_STRING name,
 
   if (arg_count < 3 || (arg_count & 1) == 0 /*is even*/)
   {
-    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name.str);
+    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name->str);
   }
   else
   {
@@ -5346,7 +5323,7 @@ Create_func_json_replace::create_native(THD *thd, LEX_STRING name,
 Create_func_json_remove Create_func_json_remove::s_singleton;
 
 Item*
-Create_func_json_remove::create_native(THD *thd, LEX_STRING name,
+Create_func_json_remove::create_native(THD *thd, LEX_CSTRING *name,
                                        List<Item> *item_list)
 {
   Item *func= NULL;
@@ -5357,7 +5334,7 @@ Create_func_json_remove::create_native(THD *thd, LEX_STRING name,
 
   if (arg_count < 2 /*json_doc, path [,path]*/)
   {
-    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name.str);
+    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name->str);
   }
   else
   {
@@ -5371,7 +5348,7 @@ Create_func_json_remove::create_native(THD *thd, LEX_STRING name,
 Create_func_json_object Create_func_json_object::s_singleton;
 
 Item*
-Create_func_json_object::create_native(THD *thd, LEX_STRING name,
+Create_func_json_object::create_native(THD *thd, LEX_CSTRING *name,
                                        List<Item> *item_list)
 {
   Item *func;
@@ -5382,7 +5359,7 @@ Create_func_json_object::create_native(THD *thd, LEX_STRING name,
     arg_count= item_list->elements;
     if ((arg_count & 1) != 0 /*is odd*/)
     {
-      my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name.str);
+      my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name->str);
       func= NULL;
     }
     else
@@ -5403,7 +5380,7 @@ Create_func_json_object::create_native(THD *thd, LEX_STRING name,
 Create_func_json_length Create_func_json_length::s_singleton;
 
 Item*
-Create_func_json_length::create_native(THD *thd, LEX_STRING name,
+Create_func_json_length::create_native(THD *thd, LEX_CSTRING *name,
                                        List<Item> *item_list)
 {
   Item *func;
@@ -5412,7 +5389,7 @@ Create_func_json_length::create_native(THD *thd, LEX_STRING name,
   if (item_list == NULL ||
       (arg_count= item_list->elements) == 0)
   {
-    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name.str);
+    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name->str);
     func= NULL;
   }
   else
@@ -5427,7 +5404,7 @@ Create_func_json_length::create_native(THD *thd, LEX_STRING name,
 Create_func_json_merge Create_func_json_merge::s_singleton;
 
 Item*
-Create_func_json_merge::create_native(THD *thd, LEX_STRING name,
+Create_func_json_merge::create_native(THD *thd, LEX_CSTRING *name,
                                       List<Item> *item_list)
 {
   Item *func;
@@ -5436,7 +5413,7 @@ Create_func_json_merge::create_native(THD *thd, LEX_STRING name,
   if (item_list == NULL ||
       (arg_count= item_list->elements) < 2) // json, json
   {
-    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name.str);
+    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name->str);
     func= NULL;
   }
   else
@@ -5451,7 +5428,7 @@ Create_func_json_merge::create_native(THD *thd, LEX_STRING name,
 Create_func_json_contains Create_func_json_contains::s_singleton;
 
 Item*
-Create_func_json_contains::create_native(THD *thd, LEX_STRING name,
+Create_func_json_contains::create_native(THD *thd, LEX_CSTRING *name,
                                          List<Item> *item_list)
 {
   Item *func= NULL;
@@ -5466,7 +5443,7 @@ Create_func_json_contains::create_native(THD *thd, LEX_STRING name,
   }
   else
   {
-    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name.str);
+    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name->str);
   }
 
   return func;
@@ -5476,7 +5453,7 @@ Create_func_json_contains::create_native(THD *thd, LEX_STRING name,
 Create_func_json_keys Create_func_json_keys::s_singleton;
 
 Item*
-Create_func_json_keys::create_native(THD *thd, LEX_STRING name,
+Create_func_json_keys::create_native(THD *thd, LEX_CSTRING *name,
                                      List<Item> *item_list)
 {
   Item *func= NULL;
@@ -5487,7 +5464,7 @@ Create_func_json_keys::create_native(THD *thd, LEX_STRING name,
 
   if (arg_count < 1 || arg_count > 2 /* json_doc, [path]...*/)
   {
-    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name.str);
+    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name->str);
   }
   else
   {
@@ -5501,7 +5478,7 @@ Create_func_json_keys::create_native(THD *thd, LEX_STRING name,
 Create_func_json_contains_path Create_func_json_contains_path::s_singleton;
 
 Item*
-Create_func_json_contains_path::create_native(THD *thd, LEX_STRING name,
+Create_func_json_contains_path::create_native(THD *thd, LEX_CSTRING *name,
                                                  List<Item> *item_list)
 {
   Item *func= NULL;
@@ -5512,7 +5489,7 @@ Create_func_json_contains_path::create_native(THD *thd, LEX_STRING name,
 
   if (arg_count < 3 /* json_doc, one_or_all, path, [path]...*/)
   {
-    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name.str);
+    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name->str);
   }
   else
   {
@@ -5526,7 +5503,7 @@ Create_func_json_contains_path::create_native(THD *thd, LEX_STRING name,
 Create_func_json_extract Create_func_json_extract::s_singleton;
 
 Item*
-Create_func_json_extract::create_native(THD *thd, LEX_STRING name,
+Create_func_json_extract::create_native(THD *thd, LEX_CSTRING *name,
                                                  List<Item> *item_list)
 {
   Item *func= NULL;
@@ -5537,7 +5514,7 @@ Create_func_json_extract::create_native(THD *thd, LEX_STRING name,
 
   if (arg_count < 2 /* json_doc, path, [path]...*/)
   {
-    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name.str);
+    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name->str);
   }
   else
   {
@@ -5551,7 +5528,7 @@ Create_func_json_extract::create_native(THD *thd, LEX_STRING name,
 Create_func_json_search Create_func_json_search::s_singleton;
 
 Item*
-Create_func_json_search::create_native(THD *thd, LEX_STRING name,
+Create_func_json_search::create_native(THD *thd, LEX_CSTRING *name,
                                        List<Item> *item_list)
 {
   Item *func= NULL;
@@ -5562,7 +5539,7 @@ Create_func_json_search::create_native(THD *thd, LEX_STRING name,
 
   if (arg_count < 3 /* json_doc, one_or_all, search_str, [escape_char[, path]...*/)
   {
-    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name.str);
+    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name->str);
   }
   else
   {
@@ -5576,7 +5553,7 @@ Create_func_json_search::create_native(THD *thd, LEX_STRING name,
 Create_func_last_insert_id Create_func_last_insert_id::s_singleton;
 
 Item*
-Create_func_last_insert_id::create_native(THD *thd, LEX_STRING name,
+Create_func_last_insert_id::create_native(THD *thd, LEX_CSTRING *name,
                                           List<Item> *item_list)
 {
   Item *func= NULL;
@@ -5601,7 +5578,7 @@ Create_func_last_insert_id::create_native(THD *thd, LEX_STRING name,
   }
   default:
   {
-    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name.str);
+    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name->str);
     break;
   }
   }
@@ -5622,7 +5599,7 @@ Create_func_lcase::create_1_arg(THD *thd, Item *arg1)
 Create_func_least Create_func_least::s_singleton;
 
 Item*
-Create_func_least::create_native(THD *thd, LEX_STRING name,
+Create_func_least::create_native(THD *thd, LEX_CSTRING *name,
                                  List<Item> *item_list)
 {
   int arg_count= 0;
@@ -5632,7 +5609,7 @@ Create_func_least::create_native(THD *thd, LEX_STRING name,
 
   if (arg_count < 2)
   {
-    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name.str);
+    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name->str);
     return NULL;
   }
 
@@ -5645,7 +5622,18 @@ Create_func_length Create_func_length::s_singleton;
 Item*
 Create_func_length::create_1_arg(THD *thd, Item *arg1)
 {
-  return new (thd->mem_root) Item_func_length(thd, arg1);
+  if (thd->variables.sql_mode & MODE_ORACLE)
+    return new (thd->mem_root) Item_func_char_length(thd, arg1);
+  else
+    return new (thd->mem_root) Item_func_octet_length(thd, arg1);
+}
+
+Create_func_octet_length Create_func_octet_length::s_singleton;
+
+Item*
+Create_func_octet_length::create_1_arg(THD *thd, Item *arg1)
+{
+  return new (thd->mem_root) Item_func_octet_length(thd, arg1);
 }
 
 
@@ -5693,7 +5681,7 @@ Create_func_load_file::create_1_arg(THD *thd, Item *arg1)
 Create_func_locate Create_func_locate::s_singleton;
 
 Item*
-Create_func_locate::create_native(THD *thd, LEX_STRING name,
+Create_func_locate::create_native(THD *thd, LEX_CSTRING *name,
                                   List<Item> *item_list)
 {
   Item *func= NULL;
@@ -5722,7 +5710,7 @@ Create_func_locate::create_native(THD *thd, LEX_STRING name,
   }
   default:
   {
-    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name.str);
+    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name->str);
     break;
   }
   }
@@ -5734,7 +5722,7 @@ Create_func_locate::create_native(THD *thd, LEX_STRING name,
 Create_func_log Create_func_log::s_singleton;
 
 Item*
-Create_func_log::create_native(THD *thd, LEX_STRING name,
+Create_func_log::create_native(THD *thd, LEX_CSTRING *name,
                                List<Item> *item_list)
 {
   Item *func= NULL;
@@ -5759,7 +5747,7 @@ Create_func_log::create_native(THD *thd, LEX_STRING name,
   }
   default:
   {
-    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name.str);
+    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name->str);
     break;
   }
   }
@@ -5789,9 +5777,34 @@ Create_func_log2::create_1_arg(THD *thd, Item *arg1)
 Create_func_lpad Create_func_lpad::s_singleton;
 
 Item*
-Create_func_lpad::create_3_arg(THD *thd, Item *arg1, Item *arg2, Item *arg3)
+Create_func_lpad::create_native(THD *thd, LEX_CSTRING *name,
+                                List<Item> *item_list)
 {
-  return new (thd->mem_root) Item_func_lpad(thd, arg1, arg2, arg3);
+  Item *func= NULL;
+  int arg_count= item_list ? item_list->elements : 0;
+
+  switch (arg_count) {
+  case 2:
+  {
+    Item *param_1= item_list->pop();
+    Item *param_2= item_list->pop();
+    func= new (thd->mem_root) Item_func_lpad(thd, param_1, param_2);
+    break;
+  }
+  case 3:
+  {
+    Item *param_1= item_list->pop();
+    Item *param_2= item_list->pop();
+    Item *param_3= item_list->pop();
+    func= new (thd->mem_root) Item_func_lpad(thd, param_1, param_2, param_3);
+    break;
+  }
+  default:
+    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name->str);
+    break;
+  }
+
+  return func;
 }
 
 
@@ -5825,7 +5838,7 @@ Create_func_maketime::create_3_arg(THD *thd, Item *arg1, Item *arg2, Item *arg3)
 Create_func_make_set Create_func_make_set::s_singleton;
 
 Item*
-Create_func_make_set::create_native(THD *thd, LEX_STRING name,
+Create_func_make_set::create_native(THD *thd, LEX_CSTRING *name,
                                     List<Item> *item_list)
 {
   int arg_count= 0;
@@ -5835,7 +5848,7 @@ Create_func_make_set::create_native(THD *thd, LEX_STRING name,
 
   if (arg_count < 2)
   {
-    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name.str);
+    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name->str);
     return NULL;
   }
 
@@ -5846,7 +5859,7 @@ Create_func_make_set::create_native(THD *thd, LEX_STRING name,
 Create_func_master_pos_wait Create_func_master_pos_wait::s_singleton;
 
 Item*
-Create_func_master_pos_wait::create_native(THD *thd, LEX_STRING name,
+Create_func_master_pos_wait::create_native(THD *thd, LEX_CSTRING *name,
                                            List<Item> *item_list)
 
 {
@@ -5860,7 +5873,7 @@ Create_func_master_pos_wait::create_native(THD *thd, LEX_STRING name,
 
   if (arg_count < 2 || arg_count > 4)
   {
-    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name.str);
+    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name->str);
     return func;
   }
 
@@ -5897,7 +5910,7 @@ Create_func_master_pos_wait::create_native(THD *thd, LEX_STRING name,
 Create_func_master_gtid_wait Create_func_master_gtid_wait::s_singleton;
 
 Item*
-Create_func_master_gtid_wait::create_native(THD *thd, LEX_STRING name,
+Create_func_master_gtid_wait::create_native(THD *thd, LEX_CSTRING *name,
                                             List<Item> *item_list)
 {
   Item *func= NULL;
@@ -5910,7 +5923,7 @@ Create_func_master_gtid_wait::create_native(THD *thd, LEX_STRING name,
 
   if (arg_count < 1 || arg_count > 2)
   {
-    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name.str);
+    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name->str);
     return func;
   }
 
@@ -6143,7 +6156,7 @@ Create_func_radians::create_1_arg(THD *thd, Item *arg1)
 Create_func_rand Create_func_rand::s_singleton;
 
 Item*
-Create_func_rand::create_native(THD *thd, LEX_STRING name,
+Create_func_rand::create_native(THD *thd, LEX_CSTRING *name,
                                 List<Item> *item_list)
 {
   Item *func= NULL;
@@ -6181,7 +6194,7 @@ Create_func_rand::create_native(THD *thd, LEX_STRING name,
   }
   default:
   {
-    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name.str);
+    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name->str);
     break;
   }
   }
@@ -6213,7 +6226,7 @@ Create_func_reverse::create_1_arg(THD *thd, Item *arg1)
 Create_func_round Create_func_round::s_singleton;
 
 Item*
-Create_func_round::create_native(THD *thd, LEX_STRING name,
+Create_func_round::create_native(THD *thd, LEX_CSTRING *name,
                                  List<Item> *item_list)
 {
   Item *func= NULL;
@@ -6239,7 +6252,7 @@ Create_func_round::create_native(THD *thd, LEX_STRING name,
   }
   default:
   {
-    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name.str);
+    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name->str);
     break;
   }
   }
@@ -6251,9 +6264,34 @@ Create_func_round::create_native(THD *thd, LEX_STRING name,
 Create_func_rpad Create_func_rpad::s_singleton;
 
 Item*
-Create_func_rpad::create_3_arg(THD *thd, Item *arg1, Item *arg2, Item *arg3)
+Create_func_rpad::create_native(THD *thd, LEX_CSTRING *name,
+                                List<Item> *item_list)
 {
-  return new (thd->mem_root) Item_func_rpad(thd, arg1, arg2, arg3);
+  Item *func= NULL;
+  int arg_count= item_list ? item_list->elements : 0;
+
+  switch (arg_count) {
+  case 2:
+  {
+    Item *param_1= item_list->pop();
+    Item *param_2= item_list->pop();
+    func= new (thd->mem_root) Item_func_rpad(thd, param_1, param_2);
+    break;
+  }
+  case 3:
+  {
+    Item *param_1= item_list->pop();
+    Item *param_2= item_list->pop();
+    Item *param_3= item_list->pop();
+    func= new (thd->mem_root) Item_func_rpad(thd, param_1, param_2, param_3);
+    break;
+  }
+  default:
+    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name->str);
+    break;
+  }
+
+  return func;
 }
 
 
@@ -6522,7 +6560,7 @@ Create_func_unhex::create_1_arg(THD *thd, Item *arg1)
 Create_func_unix_timestamp Create_func_unix_timestamp::s_singleton;
 
 Item*
-Create_func_unix_timestamp::create_native(THD *thd, LEX_STRING name,
+Create_func_unix_timestamp::create_native(THD *thd, LEX_CSTRING *name,
                                           List<Item> *item_list)
 {
   Item *func= NULL;
@@ -6546,7 +6584,7 @@ Create_func_unix_timestamp::create_native(THD *thd, LEX_STRING name,
   }
   default:
   {
-    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name.str);
+    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name->str);
     break;
   }
   }
@@ -6677,7 +6715,7 @@ Create_func_y::create_1_arg(THD *thd, Item *arg1)
 Create_func_year_week Create_func_year_week::s_singleton;
 
 Item*
-Create_func_year_week::create_native(THD *thd, LEX_STRING name,
+Create_func_year_week::create_native(THD *thd, LEX_CSTRING *name,
                                      List<Item> *item_list)
 {
   Item *func= NULL;
@@ -6703,7 +6741,7 @@ Create_func_year_week::create_native(THD *thd, LEX_STRING name,
   }
   default:
   {
-    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name.str);
+    my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name->str);
     break;
   }
   }
@@ -6714,7 +6752,7 @@ Create_func_year_week::create_native(THD *thd, LEX_STRING name,
 
 struct Native_func_registry
 {
-  LEX_STRING name;
+  LEX_CSTRING name;
   Create_func *builder;
 };
 
@@ -6777,6 +6815,7 @@ static Native_func_registry func_array[] =
   { { C_STRING_WITH_LEN("CONV") }, BUILDER(Create_func_conv)},
   { { C_STRING_WITH_LEN("CONVERT_TZ") }, BUILDER(Create_func_convert_tz)},
   { { C_STRING_WITH_LEN("CONVEXHULL") }, GEOM_BUILDER(Create_func_convexhull)},
+  { { C_STRING_WITH_LEN("CHR") }, BUILDER(Create_func_chr)},
   { { C_STRING_WITH_LEN("COS") }, BUILDER(Create_func_cos)},
   { { C_STRING_WITH_LEN("COT") }, BUILDER(Create_func_cot)},
   { { C_STRING_WITH_LEN("CRC32") }, BUILDER(Create_func_crc32)},
@@ -6875,6 +6914,7 @@ static Native_func_registry func_array[] =
   { { C_STRING_WITH_LEN("LCASE") }, BUILDER(Create_func_lcase)},
   { { C_STRING_WITH_LEN("LEAST") }, BUILDER(Create_func_least)},
   { { C_STRING_WITH_LEN("LENGTH") }, BUILDER(Create_func_length)},
+  { { C_STRING_WITH_LEN("LENGTHB") }, BUILDER(Create_func_octet_length)},
 #ifndef DBUG_OFF
   { { C_STRING_WITH_LEN("LIKE_RANGE_MIN") }, BUILDER(Create_func_like_range_min)},
   { { C_STRING_WITH_LEN("LIKE_RANGE_MAX") }, BUILDER(Create_func_like_range_max)},
@@ -6927,7 +6967,7 @@ static Native_func_registry func_array[] =
   { { C_STRING_WITH_LEN("NUMINTERIORRINGS") }, GEOM_BUILDER(Create_func_numinteriorring)},
   { { C_STRING_WITH_LEN("NUMPOINTS") }, GEOM_BUILDER(Create_func_numpoints)},
   { { C_STRING_WITH_LEN("OCT") }, BUILDER(Create_func_oct)},
-  { { C_STRING_WITH_LEN("OCTET_LENGTH") }, BUILDER(Create_func_length)},
+  { { C_STRING_WITH_LEN("OCTET_LENGTH") }, BUILDER(Create_func_octet_length)},
   { { C_STRING_WITH_LEN("ORD") }, BUILDER(Create_func_ord)},
   { { C_STRING_WITH_LEN("OVERLAPS") }, GEOM_BUILDER(Create_func_mbr_overlaps)},
   { { C_STRING_WITH_LEN("PERIOD_ADD") }, BUILDER(Create_func_period_add)},
@@ -7143,15 +7183,15 @@ void item_create_cleanup()
 }
 
 Create_func *
-find_native_function_builder(THD *thd, LEX_STRING name)
+find_native_function_builder(THD *thd, const LEX_CSTRING *name)
 {
   Native_func_registry *func;
   Create_func *builder= NULL;
 
   /* Thread safe */
-  func= (Native_func_registry*) my_hash_search(& native_functions_hash,
-                                               (uchar*) name.str,
-                                               name.length);
+  func= (Native_func_registry*) my_hash_search(&native_functions_hash,
+                                               (uchar*) name->str,
+                                               name->length);
 
   if (func)
   {
@@ -7165,114 +7205,6 @@ Create_qfunc *
 find_qualified_function_builder(THD *thd)
 {
   return & Create_sp_func::s_singleton;
-}
-
-
-Item *
-create_func_cast(THD *thd, Item *a, Cast_target cast_type,
-                 const char *c_len, const char *c_dec,
-                 CHARSET_INFO *cs)
-{
-  Item *UNINIT_VAR(res);
-  ulonglong length= 0, decimals= 0;
-  int error;
-  
-  /*
-    We don't have to check for error here as sql_yacc.yy has guaranteed
-    that the values are in range of ulonglong
-  */
-  if (c_len)
-    length= (ulonglong) my_strtoll10(c_len, NULL, &error);
-  if (c_dec)
-    decimals= (ulonglong) my_strtoll10(c_dec, NULL, &error);
-
-  switch (cast_type) {
-  case ITEM_CAST_BINARY:
-    res= new (thd->mem_root) Item_func_binary(thd, a);
-    break;
-  case ITEM_CAST_SIGNED_INT:
-    res= new (thd->mem_root) Item_func_signed(thd, a);
-    break;
-  case ITEM_CAST_UNSIGNED_INT:
-    res= new (thd->mem_root) Item_func_unsigned(thd, a);
-    break;
-  case ITEM_CAST_DATE:
-    res= new (thd->mem_root) Item_date_typecast(thd, a);
-    break;
-  case ITEM_CAST_TIME:
-    if (decimals > MAX_DATETIME_PRECISION)
-    {
-      wrong_precision_error(ER_TOO_BIG_PRECISION, a, decimals,
-                            MAX_DATETIME_PRECISION);
-      return 0;
-    }
-    res= new (thd->mem_root) Item_time_typecast(thd, a, (uint) decimals);
-    break;
-  case ITEM_CAST_DATETIME:
-    if (decimals > MAX_DATETIME_PRECISION)
-    {
-      wrong_precision_error(ER_TOO_BIG_PRECISION, a, decimals,
-                            MAX_DATETIME_PRECISION);
-      return 0;
-    }
-    res= new (thd->mem_root) Item_datetime_typecast(thd, a, (uint) decimals);
-    break;
-  case ITEM_CAST_DECIMAL:
-  {
-    ulong len;
-    uint dec;
-    if (get_length_and_scale(length, decimals, &len, &dec,
-                             DECIMAL_MAX_PRECISION, DECIMAL_MAX_SCALE,
-                             a))
-      return NULL;
-    res= new (thd->mem_root) Item_decimal_typecast(thd, a, len, dec);
-    break;
-  }
-  case ITEM_CAST_DOUBLE:
-  {
-    ulong len;
-    uint dec;
-
-    if (!c_len)
-    {
-      length=   DBL_DIG+7;
-      decimals= NOT_FIXED_DEC;
-    }
-    else if (get_length_and_scale(length, decimals, &len, &dec,
-                                  DECIMAL_MAX_PRECISION, NOT_FIXED_DEC-1,
-                                  a))
-      return NULL;
-    res= new (thd->mem_root) Item_double_typecast(thd, a, (uint) length,
-                                                  (uint) decimals);
-    break;
-  }
-  case ITEM_CAST_CHAR:
-  {
-    int len= -1;
-    CHARSET_INFO *real_cs= (cs ? cs : thd->variables.collation_connection);
-    if (c_len)
-    {
-      if (length > MAX_FIELD_BLOBLENGTH)
-      {
-        char buff[1024];
-        String buf(buff, sizeof(buff), system_charset_info);
-        my_error(ER_TOO_BIG_DISPLAYWIDTH, MYF(0), item_name(a, &buf),
-                 MAX_FIELD_BLOBLENGTH);
-        return NULL;
-      }
-      len= (int) length;
-    }
-    res= new (thd->mem_root) Item_char_typecast(thd, a, len, real_cs);
-    break;
-  }
-  default:
-  {
-    DBUG_ASSERT(0);
-    res= 0;
-    break;
-  }
-  }
-  return res;
 }
 
 
@@ -7433,7 +7365,7 @@ Item *create_func_dyncol_delete(THD *thd, Item *str, List<Item> &nums)
 
 
 Item *create_func_dyncol_get(THD *thd,  Item *str, Item *num,
-                             Cast_target cast_type,
+                             const Type_handler *handler,
                              const char *c_len, const char *c_dec,
                              CHARSET_INFO *cs)
 {
@@ -7441,5 +7373,6 @@ Item *create_func_dyncol_get(THD *thd,  Item *str, Item *num,
 
   if (!(res= new (thd->mem_root) Item_dyncol_get(thd, str, num)))
     return res;                                 // Return NULL
-  return create_func_cast(thd, res, cast_type, c_len, c_dec, cs);
+  return handler->create_typecast_item(thd, res,
+                                       Type_cast_attributes(c_len, c_dec, cs));
 }

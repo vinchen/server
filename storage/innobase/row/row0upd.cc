@@ -1,7 +1,7 @@
 /*****************************************************************************
 
 Copyright (c) 1996, 2016, Oracle and/or its affiliates. All Rights Reserved.
-Copyright (c) 2015, 2016, MariaDB Corporation.
+Copyright (c) 2015, 2017, MariaDB Corporation.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -1765,8 +1765,8 @@ row_upd_changes_ord_field_binary_func(
 			/* Get the new mbr. */
 			if (dfield_is_ext(new_field)) {
 				if (flag == ROW_BUILD_FOR_UNDO
-				    && dict_table_get_format(index->table)
-					>= UNIV_FORMAT_B) {
+				    && dict_table_has_atomic_blobs(
+					    index->table)) {
 					/* For undo, and the table is Barrcuda,
 					we need to skip the prefix data. */
 					flen = BTR_EXTERN_FIELD_REF_SIZE;
@@ -2175,10 +2175,10 @@ row_upd_store_row(
 	offsets = rec_get_offsets(rec, clust_index, offsets_,
 				  ULINT_UNDEFINED, &heap);
 
-	if (dict_table_get_format(node->table) >= UNIV_FORMAT_B) {
-		/* In DYNAMIC or COMPRESSED format, there is no prefix
-		of externally stored columns in the clustered index
-		record. Build a cache of column prefixes. */
+	if (dict_table_has_atomic_blobs(node->table)) {
+		/* There is no prefix of externally stored columns in
+		the clustered index record. Build a cache of column
+		prefixes. */
 		ext = &node->ext;
 	} else {
 		/* REDUNDANT and COMPACT formats store a local
@@ -2629,7 +2629,6 @@ static MY_ATTRIBUTE((nonnull, warn_unused_result))
 dberr_t
 row_upd_clust_rec_by_insert(
 /*========================*/
-	ulint		flags,  /*!< in: undo logging and locking flags */
 	upd_node_t*	node,	/*!< in/out: row update node */
 	dict_index_t*	index,	/*!< in: clustered index of the record */
 	que_thr_t*	thr,	/*!< in: query thread */
@@ -2698,7 +2697,7 @@ row_upd_clust_rec_by_insert(
 		}
 
 		err = btr_cur_del_mark_set_clust_rec(
-			flags, btr_cur_get_block(btr_cur), rec, index, offsets,
+			btr_cur_get_block(btr_cur), rec, index, offsets,
 			thr, node->row, mtr);
 		if (err != DB_SUCCESS) {
 err_exit:
@@ -2939,7 +2938,6 @@ static MY_ATTRIBUTE((nonnull, warn_unused_result))
 dberr_t
 row_upd_del_mark_clust_rec(
 /*=======================*/
-	ulint		flags,  /*!< in: undo logging and locking flags */
 	upd_node_t*	node,	/*!< in: row update node */
 	dict_index_t*	index,	/*!< in: clustered index */
 	ulint*		offsets,/*!< in/out: rec_get_offsets() for the
@@ -2977,7 +2975,7 @@ row_upd_del_mark_clust_rec(
 	rec = btr_cur_get_rec(btr_cur);
 
 	err = btr_cur_del_mark_set_clust_rec(
-		flags, btr_cur_get_block(btr_cur), rec,
+		btr_cur_get_block(btr_cur), rec,
 		index, offsets, thr, node->row, mtr);
 
 	if (err == DB_SUCCESS && referenced) {
@@ -3068,12 +3066,13 @@ row_upd_clust_step(
 	mtr_start_trx(&mtr, thr_get_trx(thr));
 	mtr.set_named_space(index->space);
 
-	/* Disable REDO logging as lifetime of temp-tables is limited to
-	server or connection lifetime and so REDO information is not needed
-	on restart for recovery.
-	Disable locking as temp-tables are not shared across connection. */
 	if (dict_table_is_temporary(node->table)) {
-		flags = BTR_NO_LOCKING_FLAG;
+		/* Disable locking, because temporary tables are
+		private to the connection (no concurrent access). */
+		flags = node->table->no_rollback()
+			? BTR_NO_ROLLBACK
+			: BTR_NO_LOCKING_FLAG;
+		/* Redo logging only matters for persistent tables. */
 		mtr.set_log_mode(MTR_LOG_NO_REDO);
 	} else {
 		flags = node->table->no_rollback() ? BTR_NO_ROLLBACK : 0;
@@ -3144,9 +3143,9 @@ row_upd_clust_step(
 	offsets = rec_get_offsets(rec, index, offsets_,
 				  ULINT_UNDEFINED, &heap);
 
-	if (!node->has_clust_rec_x_lock) {
+	if (!flags && !node->has_clust_rec_x_lock) {
 		err = lock_clust_rec_modify_check_and_lock(
-			flags, btr_pcur_get_block(pcur),
+			0, btr_pcur_get_block(pcur),
 			rec, index, offsets, thr);
 		if (err != DB_SUCCESS) {
 			mtr_commit(&mtr);
@@ -3154,15 +3153,16 @@ row_upd_clust_step(
 		}
 	}
 
-	ut_ad(lock_trx_has_rec_x_lock(thr_get_trx(thr), index->table,
-				      btr_pcur_get_block(pcur),
-				      page_rec_get_heap_no(rec)));
+	ut_ad(index->table->no_rollback()
+	      || lock_trx_has_rec_x_lock(thr_get_trx(thr), index->table,
+					 btr_pcur_get_block(pcur),
+					 page_rec_get_heap_no(rec)));
 
 	/* NOTE: the following function calls will also commit mtr */
 
 	if (node->is_delete) {
 		err = row_upd_del_mark_clust_rec(
-			flags, node, index, offsets, thr, referenced, foreign, &mtr);
+			node, index, offsets, thr, referenced, foreign, &mtr);
 
 		if (err == DB_SUCCESS) {
 			node->state = UPD_NODE_UPDATE_ALL_SEC;
@@ -3208,7 +3208,7 @@ row_upd_clust_step(
 		externally! */
 
 		err = row_upd_clust_rec_by_insert(
-			flags, node, index, thr, referenced, foreign, &mtr);
+			node, index, thr, referenced, foreign, &mtr);
 		if (err != DB_SUCCESS) {
 
 			goto exit_func;
@@ -3255,7 +3255,7 @@ row_upd(
 	ut_ad(!thr_get_trx(thr)->in_rollback);
 
 	DBUG_PRINT("row_upd", ("table: %s", node->table->name.m_name));
-	DBUG_PRINT("row_upd", ("info bits in update vector: 0x%lx",
+	DBUG_PRINT("row_upd", ("info bits in update vector: 0x" ULINTPFx,
 			       node->update ? node->update->info_bits: 0));
 	DBUG_PRINT("row_upd", ("foreign_id: %s",
 			       node->foreign ? node->foreign->id: "NULL"));
@@ -3355,8 +3355,6 @@ row_upd_step(
 	ut_ad(thr);
 
 	trx = thr_get_trx(thr);
-
-	trx_start_if_not_started_xa(trx, true);
 
 	node = static_cast<upd_node_t*>(thr->run_node);
 

@@ -1502,8 +1502,10 @@ rec_convert_dtuple_to_rec_comp(
 			}
 		}
 
-		memcpy(end, dfield_get_data(field), len);
-		end += len;
+		if (len) {
+			memcpy(end, dfield_get_data(field), len);
+			end += len;
+		}
 	}
 
 	if (!num_v) {
@@ -1812,6 +1814,7 @@ rec_copy_prefix_to_buf(
 	ulint		prefix_len;
 	ulint		null_mask;
 	ulint		status;
+	bool		is_rtr_node_ptr = false;
 
 	UNIV_PREFETCH_RW(*buf);
 
@@ -1833,6 +1836,7 @@ rec_copy_prefix_to_buf(
 		/* For R-tree, we need to copy the child page number field. */
 		if (dict_index_is_spatial(index)) {
 			ut_ad(n_fields == DICT_INDEX_SPATIAL_NODEPTR_SIZE + 1);
+			is_rtr_node_ptr = true;
 		} else {
 			/* it doesn't make sense to copy the child page number
 			field */
@@ -1900,7 +1904,11 @@ rec_copy_prefix_to_buf(
 			null_mask <<= 1;
 		}
 
-		if (field->fixed_len) {
+		if (is_rtr_node_ptr && i == 1) {
+			/* For rtree node ptr rec, we need to
+			copy the page no field with 4 bytes len. */
+			prefix_len += 4;
+		} else if (field->fixed_len) {
 			prefix_len += field->fixed_len;
 		} else {
 			ulint	len = *lens--;
@@ -2054,17 +2062,17 @@ rec_print_old(
 
 	n = rec_get_n_fields_old(rec);
 
-	fprintf(file, "PHYSICAL RECORD: n_fields %lu;"
-		" %u-byte offsets; info bits %lu\n",
-		(ulong) n,
+	fprintf(file, "PHYSICAL RECORD: n_fields " ULINTPF ";"
+		" %u-byte offsets; info bits " ULINTPF "\n",
+		n,
 		rec_get_1byte_offs_flag(rec) ? 1 : 2,
-		(ulong) rec_get_info_bits(rec, FALSE));
+		rec_get_info_bits(rec, FALSE));
 
 	for (i = 0; i < n; i++) {
 
 		data = rec_get_nth_field_old(rec, i, &len);
 
-		fprintf(file, " %lu:", (ulong) i);
+		fprintf(file, " " ULINTPF ":", i);
 
 		if (len != UNIV_SQL_NULL) {
 			if (len <= 30) {
@@ -2073,8 +2081,8 @@ rec_print_old(
 			} else {
 				ut_print_buf(file, data, 30);
 
-				fprintf(file, " (total %lu bytes)",
-					(ulong) len);
+				fprintf(file, " (total " ULINTPF " bytes)",
+					len);
 			}
 		} else {
 			fprintf(file, " SQL NULL, size " ULINTPF " ",
@@ -2111,7 +2119,7 @@ rec_print_comp(
 			data = rec_get_nth_field_inside(rec, offsets, i, &len);
 		}
 
-		fprintf(file, " %lu:", (ulong) i);
+		fprintf(file, " " ULINTPF ":", i);
 
 		if (len == UNIV_SQL_NULL) {
 			fputs(" SQL NULL", file);
@@ -2123,16 +2131,17 @@ rec_print_comp(
 				ut_print_buf(file, data, len);
 			} else if (rec_offs_nth_extern(offsets, i)) {
 				ut_print_buf(file, data, 30);
-				fprintf(file, " (total %lu bytes, external)",
-					(ulong) len);
+				fprintf(file,
+					" (total " ULINTPF " bytes, external)",
+					len);
 				ut_print_buf(file, data + len
 					     - BTR_EXTERN_FIELD_REF_SIZE,
 					     BTR_EXTERN_FIELD_REF_SIZE);
 			} else {
 				ut_print_buf(file, data, 30);
 
-				fprintf(file, " (total %lu bytes)",
-					(ulong) len);
+				fprintf(file, " (total " ULINTPF " bytes)",
+					len);
 			}
 		} 
 		putc(';', file);
@@ -2196,7 +2205,7 @@ rec_print_mbr_old(
 				}
 			}
 		} else {
-			fprintf(file, " SQL NULL, size %lu ",
+			fprintf(file, " SQL NULL, size " ULINTPF " ",
 				rec_get_nth_field_size(rec, i));
 		}
 
@@ -2318,10 +2327,10 @@ rec_print_new(
 		return;
 	}
 
-	fprintf(file, "PHYSICAL RECORD: n_fields %lu;"
-		" compact format; info bits %lu\n",
-		(ulong) rec_offs_n_fields(offsets),
-		(ulong) rec_get_info_bits(rec, TRUE));
+	fprintf(file, "PHYSICAL RECORD: n_fields " ULINTPF ";"
+		" compact format; info bits " ULINTPF "\n",
+		rec_offs_n_fields(offsets),
+		rec_get_info_bits(rec, TRUE));
 
 	rec_print_comp(file, rec, offsets);
 	rec_validate(rec, offsets);
@@ -2543,9 +2552,10 @@ wsrep_rec_get_foreign_key(
 		data = rec_get_nth_field_inside(rec, offsets, i, &len);
 		if (key_len + ((len != UNIV_SQL_NULL) ? len + 1 : 1) > 
 		    *buf_len) {
-			fprintf (stderr, 
-				 "WSREP: FK key len exceeded %lu %lu %lu\n", 
-				 key_len, len, *buf_len);
+			fprintf(stderr,
+				"WSREP: FK key len exceeded "
+				ULINTPF " " ULINTPF " " ULINTPF "\n",
+				key_len, len, *buf_len);
 			goto err_out;
 		}
 

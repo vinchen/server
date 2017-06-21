@@ -105,6 +105,7 @@
 #include "sp_rcontext.h"
 #include "sp_cache.h"
 #include "sql_reload.h"  // reload_acl_and_cache
+#include "pcre.h"
 
 #ifdef HAVE_POLL_H
 #include <poll.h>
@@ -297,6 +298,7 @@ static TYPELIB tc_heuristic_recover_typelib=
 
 const char *first_keyword= "first", *binary_keyword= "BINARY";
 const char *my_localhost= "localhost", *delayed_user= "DELAYED";
+const char *quoted_string= "%`s";
 
 bool opt_large_files= sizeof(my_off_t) > 4;
 static my_bool opt_autocommit; ///< for --autocommit command-line option
@@ -329,8 +331,12 @@ static PSI_thread_key key_thread_handle_con_sockets;
 static PSI_thread_key key_thread_handle_shutdown;
 #endif /* __WIN__ */
 
-#if defined (HAVE_OPENSSL) && !defined(HAVE_YASSL)
+#ifdef HAVE_OPENSSL
+#include <ssl_compat.h>
+
+#ifdef HAVE_OPENSSL10
 static PSI_rwlock_key key_rwlock_openssl;
+#endif
 #endif
 #endif /* HAVE_PSI_INTERFACE */
 
@@ -622,6 +628,7 @@ Time_zone *default_tz;
 
 const char *mysql_real_data_home_ptr= mysql_real_data_home;
 char server_version[SERVER_VERSION_LENGTH], *server_version_ptr;
+bool using_custom_server_version= false;
 char *mysqld_unix_port, *opt_mysql_tmpdir;
 ulong thread_handling;
 
@@ -629,10 +636,10 @@ my_bool encrypt_binlog;
 my_bool encrypt_tmp_disk_tables, encrypt_tmp_files;
 
 /** name of reference on left expression in rewritten IN subquery */
-const char *in_left_expr_name= "<left expr>";
+const LEX_CSTRING in_left_expr_name= {STRING_WITH_LEN("<left expr>") };
 /** name of additional condition */
-const char *in_additional_cond= "<IN COND>";
-const char *in_having_cond= "<IN HAVING>";
+const LEX_CSTRING in_having_cond= {STRING_WITH_LEN("<IN HAVING>") };
+const LEX_CSTRING in_additional_cond= {STRING_WITH_LEN("<IN COND>") };
 
 /** Number of connection errors when selecting on the listening port */
 ulong connection_errors_select= 0;
@@ -919,8 +926,7 @@ PSI_mutex_key key_BINLOG_LOCK_index, key_BINLOG_LOCK_xid_list,
   key_PARTITION_LOCK_auto_inc;
 PSI_mutex_key key_RELAYLOG_LOCK_index;
 PSI_mutex_key key_LOCK_slave_state, key_LOCK_binlog_state,
-  key_LOCK_rpl_thread, key_LOCK_rpl_thread_pool, key_LOCK_parallel_entry,
-  key_LOCK_SEQUENCE;
+  key_LOCK_rpl_thread, key_LOCK_rpl_thread_pool, key_LOCK_parallel_entry;
 
 PSI_mutex_key key_LOCK_stats,
   key_LOCK_global_user_client_stats, key_LOCK_global_table_stats,
@@ -1005,7 +1011,6 @@ static PSI_mutex_info all_server_mutexes[]=
   { &key_LOCK_slave_state, "LOCK_slave_state", 0},
   { &key_LOCK_start_thread, "LOCK_start_thread", PSI_FLAG_GLOBAL},
   { &key_LOCK_binlog_state, "LOCK_binlog_state", 0},
-  { &key_LOCK_SEQUENCE, "SQUENCE::LOCK_SEQUENCE", 0},
   { &key_LOCK_rpl_thread, "LOCK_rpl_thread", 0},
   { &key_LOCK_rpl_thread_pool, "LOCK_rpl_thread_pool", 0},
   { &key_LOCK_parallel_entry, "LOCK_parallel_entry", 0}
@@ -1013,17 +1018,20 @@ static PSI_mutex_info all_server_mutexes[]=
 
 PSI_rwlock_key key_rwlock_LOCK_grant, key_rwlock_LOCK_logger,
   key_rwlock_LOCK_sys_init_connect, key_rwlock_LOCK_sys_init_slave,
-  key_rwlock_LOCK_system_variables_hash, key_rwlock_query_cache_query_lock;
+  key_rwlock_LOCK_system_variables_hash, key_rwlock_query_cache_query_lock,
+  key_LOCK_SEQUENCE;
+
 
 static PSI_rwlock_info all_server_rwlocks[]=
 {
-#if defined (HAVE_OPENSSL) && !defined(HAVE_YASSL)
+#ifdef HAVE_OPENSSL10
   { &key_rwlock_openssl, "CRYPTO_dynlock_value::lock", 0},
 #endif
   { &key_rwlock_LOCK_grant, "LOCK_grant", PSI_FLAG_GLOBAL},
   { &key_rwlock_LOCK_logger, "LOGGER::LOCK_logger", 0},
   { &key_rwlock_LOCK_sys_init_connect, "LOCK_sys_init_connect", PSI_FLAG_GLOBAL},
   { &key_rwlock_LOCK_sys_init_slave, "LOCK_sys_init_slave", PSI_FLAG_GLOBAL},
+  { &key_LOCK_SEQUENCE, "LOCK_SEQUENCE", 0},
   { &key_rwlock_LOCK_system_variables_hash, "LOCK_system_variables_hash", PSI_FLAG_GLOBAL},
   { &key_rwlock_query_cache_query_lock, "Query_cache_query::lock", 0}
 };
@@ -1493,7 +1501,7 @@ scheduler_functions *thread_scheduler= &thread_scheduler_struct,
 
 #ifdef HAVE_OPENSSL
 #include <openssl/crypto.h>
-#ifndef HAVE_YASSL
+#ifdef HAVE_OPENSSL10
 typedef struct CRYPTO_dynlock_value
 {
   mysql_rwlock_t lock;
@@ -1504,7 +1512,7 @@ static openssl_lock_t *openssl_dynlock_create(const char *, int);
 static void openssl_dynlock_destroy(openssl_lock_t *, const char *, int);
 static void openssl_lock_function(int, int, const char *, int);
 static void openssl_lock(int, openssl_lock_t *, const char *, int);
-#endif
+#endif /* HAVE_OPENSSL10 */
 char *des_key_file;
 #ifndef EMBEDDED_LIBRARY
 struct st_VioSSLFd *ssl_acceptor_fd;
@@ -2324,11 +2332,11 @@ static void clean_up_mutexes()
   mysql_mutex_destroy(&LOCK_global_index_stats);
 #ifdef HAVE_OPENSSL
   mysql_mutex_destroy(&LOCK_des_key_file);
-#ifndef HAVE_YASSL
+#ifdef HAVE_OPENSSL10
   for (int i= 0; i < CRYPTO_num_locks(); ++i)
     mysql_rwlock_destroy(&openssl_stdlocks[i].lock);
   OPENSSL_free(openssl_stdlocks);
-#endif /* HAVE_YASSL */
+#endif /* HAVE_OPENSSL10 */
 #endif /* HAVE_OPENSSL */
 #ifdef HAVE_REPLICATION
   mysql_mutex_destroy(&LOCK_rpl_status);
@@ -3183,7 +3191,7 @@ LONG WINAPI my_unhandler_exception_filter(EXCEPTION_POINTERS *ex_pointers)
 }
 
 
-static void init_signals(void)
+void init_signals(void)
 {
   if(opt_console)
     SetConsoleCtrlHandler(console_event_handler,TRUE);
@@ -3314,7 +3322,7 @@ static size_t my_setstacksize(pthread_attr_t *attr, size_t stacksize)
 
 #ifndef EMBEDDED_LIBRARY
 
-static void init_signals(void)
+void init_signals(void)
 {
   sigset_t set;
   struct sigaction sa;
@@ -3714,6 +3722,7 @@ static void init_libstrings()
 #endif
 }
 
+ulonglong my_pcre_frame_size;
 
 static void init_pcre()
 {
@@ -3721,6 +3730,8 @@ static void init_pcre()
   pcre_free= pcre_stack_free= my_str_free_mysqld;
 #ifndef EMBEDDED_LIBRARY
   pcre_stack_guard= check_enough_stack_size_slow;
+  /* See http://pcre.org/original/doc/html/pcrestack.html */
+  my_pcre_frame_size= -pcre_exec(NULL, NULL, NULL, -999, -999, 0, NULL, 0) + 16;
 #endif
 }
 
@@ -3766,6 +3777,7 @@ SHOW_VAR com_status_vars[]= {
   {"alter_function",       STMT_STATUS(SQLCOM_ALTER_FUNCTION)},
   {"alter_procedure",      STMT_STATUS(SQLCOM_ALTER_PROCEDURE)},
   {"alter_server",         STMT_STATUS(SQLCOM_ALTER_SERVER)},
+  {"alter_sequence",       STMT_STATUS(SQLCOM_ALTER_SEQUENCE)},
   {"alter_table",          STMT_STATUS(SQLCOM_ALTER_TABLE)},
   {"alter_tablespace",     STMT_STATUS(SQLCOM_ALTER_TABLESPACE)},
   {"alter_user",           STMT_STATUS(SQLCOM_ALTER_USER)},
@@ -4137,6 +4149,14 @@ static int init_common_variables()
     sql_perror("Could not allocate replication and binlog filters");
     return 1;
   }
+
+#ifdef HAVE_OPENSSL
+  if (check_openssl_compatibility())
+  {
+    sql_print_error("Incompatible OpenSSL version. Cannot continue...");
+    return 1;
+  }
+#endif
 
   if (init_thread_environment() ||
       mysql_init_variables())
@@ -4697,7 +4717,7 @@ static int init_thread_environment()
 #ifdef HAVE_OPENSSL
   mysql_mutex_init(key_LOCK_des_key_file,
                    &LOCK_des_key_file, MY_MUTEX_INIT_FAST);
-#ifndef HAVE_YASSL
+#ifdef HAVE_OPENSSL10
   openssl_stdlocks= (openssl_lock_t*) OPENSSL_malloc(CRYPTO_num_locks() *
                                                      sizeof(openssl_lock_t));
   for (int i= 0; i < CRYPTO_num_locks(); ++i)
@@ -4706,8 +4726,8 @@ static int init_thread_environment()
   CRYPTO_set_dynlock_destroy_callback(openssl_dynlock_destroy);
   CRYPTO_set_dynlock_lock_callback(openssl_lock);
   CRYPTO_set_locking_callback(openssl_lock_function);
-#endif
-#endif
+#endif /* HAVE_OPENSSL10 */
+#endif /* HAVE_OPENSSL */
   mysql_rwlock_init(key_rwlock_LOCK_sys_init_connect, &LOCK_sys_init_connect);
   mysql_rwlock_init(key_rwlock_LOCK_sys_init_slave, &LOCK_sys_init_slave);
   mysql_rwlock_init(key_rwlock_LOCK_grant, &LOCK_grant);
@@ -4741,7 +4761,7 @@ static int init_thread_environment()
 }
 
 
-#if defined(HAVE_OPENSSL) && !defined(HAVE_YASSL)
+#ifdef HAVE_OPENSSL10
 static openssl_lock_t *openssl_dynlock_create(const char *file, int line)
 {
   openssl_lock_t *lock= new openssl_lock_t;
@@ -4801,8 +4821,7 @@ static void openssl_lock(int mode, openssl_lock_t *lock, const char *file,
     abort();
   }
 }
-#endif /* HAVE_OPENSSL */
-
+#endif /* HAVE_OPENSSL10 */
 
 static void init_ssl()
 {
@@ -4884,7 +4903,7 @@ static int init_default_storage_engine_impl(const char *opt_name,
     return 0;
   }
 
-  LEX_STRING name= { engine_name, strlen(engine_name) };
+  LEX_CSTRING name= { engine_name, strlen(engine_name) };
   plugin_ref plugin;
   handlerton *hton;
   if ((plugin= ha_resolve_by_name(0, &name, false)))
@@ -5323,7 +5342,7 @@ static int init_server_components()
   else
   {
     /* fall back to the log files if tables are not present */
-    LEX_STRING csv_name={C_STRING_WITH_LEN("csv")};
+    LEX_CSTRING csv_name={STRING_WITH_LEN("csv")};
     if (!plugin_is_ready(&csv_name, MYSQL_STORAGE_ENGINE_PLUGIN))
     {
       /* purecov: begin inspected */
@@ -6300,7 +6319,7 @@ static void bootstrap(MYSQL_FILE *file)
   thd->variables.wsrep_on= 0;
 #endif
   thd->bootstrap=1;
-  my_net_init(&thd->net,(st_vio*) 0, (void*) 0, MYF(0));
+  my_net_init(&thd->net,(st_vio*) 0, thd, MYF(0));
   thd->max_client_packet_length= thd->net.max_packet;
   thd->security_ctx->master_access= ~(ulong)0;
   in_bootstrap= TRUE;
@@ -7282,13 +7301,6 @@ struct my_option my_long_options[]=
    &max_binlog_dump_events, &max_binlog_dump_events, 0,
    GET_INT, REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
 #endif /* HAVE_REPLICATION */
-#ifdef SAFE_MUTEX
-  {"debug-mutex-deadlock-detector", 0,
-   "Enable checking of wrong mutex usage.",
-   &safe_mutex_deadlock_detector,
-   &safe_mutex_deadlock_detector,
-   0, GET_BOOL, NO_ARG, 1, 0, 0, 0, 0, 0},
-#endif
   {"debug-no-sync", 0,
    "Disables system sync calls. Only for running tests or debugging!",
    &my_disable_sync, &my_disable_sync, 0, GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
@@ -8237,7 +8249,7 @@ static int show_default_keycache(THD *thd, SHOW_VAR *var, char *buff,
 {
   struct st_data {
     KEY_CACHE_STATISTICS stats;
-    SHOW_VAR var[8];
+    SHOW_VAR var[9];
   } *data;
   SHOW_VAR *v;
 
@@ -8965,6 +8977,7 @@ mysqld_get_one_option(int optid, const struct my_option *opt, char *argument)
     {
       strmake(server_version, argument, sizeof(server_version) - 1);
       set_sys_var_value_origin(&server_version_ptr, sys_var::CONFIG);
+      using_custom_server_version= true;
     }
 #ifndef EMBEDDED_LIBRARY
     else
@@ -9347,7 +9360,10 @@ mysql_getopt_value(const char *name, uint length,
       return (uchar**) &key_cache->changed_blocks_hash_size;
     }
   }
+  /* We return in all cases above. Let us silence -Wimplicit-fallthrough */
+  DBUG_ASSERT(0);
 #ifdef HAVE_REPLICATION
+  /* fall through */
   case OPT_REPLICATE_DO_DB:
   case OPT_REPLICATE_DO_TABLE:
   case OPT_REPLICATE_IGNORE_DB:
@@ -9444,14 +9460,6 @@ static int get_options(int *argc_ptr, char ***argv_ptr)
     between options, setting of multiple variables, etc.
     Do them here.
   */
-
-  if ((opt_log_slow_admin_statements || opt_log_queries_not_using_indexes ||
-       opt_log_slow_slave_statements) &&
-      !global_system_variables.sql_log_slow)
-    sql_print_information("options --log-slow-admin-statements, "
-                          "--log-queries-not-using-indexes and "
-                          "--log-slow-slave-statements have no "
-                          "effect if --log-slow-queries is not set");
   if (global_system_variables.net_buffer_length > 
       global_system_variables.max_allowed_packet)
   {

@@ -5248,17 +5248,17 @@ int ha_tokudb::fill_range_query_buf(
             DEBUG_SYNC(ha_thd(), "tokudb_icp_asc_scan_out_of_range");
             goto cleanup;
         } else if (result == ICP_NO_MATCH) {
-            // if we are performing a DESC ICP scan and have no end_range
-            // to compare to stop using ICP filtering as there isn't much more
-            // that we can do without going through contortions with remembering
-            // and comparing key parts.
+            // Optimizer change for MyRocks also benefits us here in TokuDB as
+            // opt_range.cc QUICK_SELECT::get_next now sets end_range during
+            // descending scan. We should not ever hit this condition, but
+            // leaving this code in to prevent any possibility of a descending
+            // scan to the beginning of an index and catch any possibility
+            // in debug builds with an assertion
+            assert_debug(!(!end_range && direction < 0));
             if (!end_range &&
                 direction < 0) {
-
                 cancel_pushed_idx_cond();
-                DEBUG_SYNC(ha_thd(), "tokudb_icp_desc_scan_invalidate");
             }
-
             error = TOKUDB_CURSOR_CONTINUE;
             goto cleanup;
         }
@@ -6108,7 +6108,6 @@ int ha_tokudb::info(uint flag) {
         stats.records = share->row_count() + share->rows_from_locked_table;
         stats.deleted = 0;
         if (!(flag & HA_STATUS_NO_LOCK)) {
-            uint64_t num_rows = 0;
 
             error = txn_begin(db_env, NULL, &txn, DB_READ_UNCOMMITTED, ha_thd());
             if (error) {
@@ -6118,20 +6117,13 @@ int ha_tokudb::info(uint flag) {
             // we should always have a primary key
             assert_always(share->file != NULL);
 
-            error = estimate_num_rows(share->file, &num_rows, txn);
-            if (error == 0) {
-                share->set_row_count(num_rows, false);
-                stats.records = num_rows;
-            } else {
-                goto cleanup;
-            }
-
             DB_BTREE_STAT64 dict_stats;
             error = share->file->stat64(share->file, txn, &dict_stats);
             if (error) {
                 goto cleanup;
             }
-
+            share->set_row_count(dict_stats.bt_ndata, false);
+            stats.records = dict_stats.bt_ndata;
             stats.create_time = dict_stats.bt_create_time_sec;
             stats.update_time = dict_stats.bt_modify_time_sec;
             stats.check_time = dict_stats.bt_verify_time_sec;
@@ -6830,7 +6822,7 @@ void ha_tokudb::update_create_info(HA_CREATE_INFO* create_info) {
 // during drop table, we do not attempt to remove already dropped
 // indexes because we did not keep status.tokudb in sync with list of indexes.
 //
-int ha_tokudb::remove_key_name_from_status(DB* status_block, char* key_name, DB_TXN* txn) {
+int ha_tokudb::remove_key_name_from_status(DB* status_block, const char* key_name, DB_TXN* txn) {
     int error;
     uchar status_key_info[FN_REFLEN + sizeof(HA_METADATA_KEY)];
     HA_METADATA_KEY md_key = hatoku_key_name;
@@ -6856,7 +6848,8 @@ int ha_tokudb::remove_key_name_from_status(DB* status_block, char* key_name, DB_
 // writes the key name in status.tokudb, so that we may later delete or rename
 // the dictionary associated with key_name
 //
-int ha_tokudb::write_key_name_to_status(DB* status_block, char* key_name, DB_TXN* txn) {
+int ha_tokudb::write_key_name_to_status(DB* status_block, const char* key_name,
+ DB_TXN* txn) {
     int error;
     uchar status_key_info[FN_REFLEN + sizeof(HA_METADATA_KEY)];
     HA_METADATA_KEY md_key = hatoku_key_name;
@@ -6895,7 +6888,7 @@ void ha_tokudb::trace_create_table_info(const char *name, TABLE * form) {
             TOKUDB_HANDLER_TRACE(
                 "field:%d:%s:type=%d:flags=%x",
                 i,
-                field->field_name,
+                field->field_name.str,
                 field->type(),
                 field->flags);
         }
@@ -6915,7 +6908,7 @@ void ha_tokudb::trace_create_table_info(const char *name, TABLE * form) {
                     i,
                     p,
                     key_part->length,
-                    field->field_name,
+                    field->field_name.str,
                     field->type(),
                     field->flags);
             }
@@ -7247,7 +7240,7 @@ int ha_tokudb::create(
                 "This is probably due to an alter table engine=TokuDB. To load this "
                 "table, do a dump and load",
                 name,
-                field->field_name
+                field->field_name.str
                 );
             error = HA_ERR_UNSUPPORTED;
             goto cleanup;
@@ -7834,7 +7827,7 @@ ha_rows ha_tokudb::records_in_range(uint keynr, key_range* start_key, key_range*
     // As a result, equal may be 0 and greater may actually be equal+greater
     // So, we call key_range64 on the key, and the key that is after it.
     if (!start_key && !end_key) {
-        error = estimate_num_rows(kfile, &rows, transaction);
+        error = estimate_num_rows(share->file, &rows, transaction);
         if (error) {
             ret_val = HA_TOKUDB_RANGE_COUNT;
             goto cleanup;

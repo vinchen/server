@@ -204,7 +204,7 @@ trx_rseg_mem_restore(trx_rseg_t* rseg, mtr_t* mtr)
 	len = flst_get_len(rseg_header + TRX_RSEG_HISTORY);
 
 	if (len > 0) {
-		trx_sys->rseg_history_len += len;
+		my_atomic_addlint(&trx_sys->rseg_history_len, len);
 
 		node_addr = trx_purge_get_log_from_hist(
 			flst_get_last(rseg_header + TRX_RSEG_HISTORY, mtr));
@@ -263,7 +263,9 @@ trx_rseg_array_init()
 }
 
 /** Create a persistent rollback segment.
-@param[in]	space_id	system or undo tablespace id */
+@param[in]	space_id	system or undo tablespace id
+@return pointer to new rollback segment
+@retval	NULL	on failure */
 trx_rseg_t*
 trx_rseg_create(ulint space_id)
 {

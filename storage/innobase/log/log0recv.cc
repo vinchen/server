@@ -1,6 +1,6 @@
 /*****************************************************************************
 
-Copyright (c) 1997, 2016, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 1997, 2017, Oracle and/or its affiliates. All Rights Reserved.
 Copyright (c) 2012, Facebook Inc.
 Copyright (c) 2013, 2017, MariaDB Corporation.
 
@@ -532,6 +532,7 @@ DECLARE_THREAD(recv_writer_thread)(
 			/*!< in: a dummy parameter required by
 			os_thread_create */
 {
+	my_thread_init();
 	ut_ad(!srv_read_only_mode);
 
 #ifdef UNIV_PFS_THREAD
@@ -568,6 +569,7 @@ DECLARE_THREAD(recv_writer_thread)(
 
 	recv_writer_thread_active = false;
 
+	my_thread_end();
 	/* We count the number of threads in os_thread_exit().
 	A created thread should always use that to exit and not
 	use return() to exit. */
@@ -715,7 +717,7 @@ loop:
 		= (ulint) (source_offset / univ_page_size.physical());
 
 	fil_io(IORequestLogRead, true,
-	       page_id_t(group->space_id, page_no),
+	       page_id_t(SRV_LOG_SPACE_FIRST_ID, page_no),
 	       univ_page_size,
 	       (ulint) (source_offset % univ_page_size.physical()),
 	       len, buf, NULL);
@@ -785,20 +787,13 @@ recv_synchronize_groups()
 
 	const lsn_t start_lsn = ut_uint64_align_down(recovered_lsn,
 						     OS_FILE_LOG_BLOCK_SIZE);
-	log_group_read_log_seg(log_sys->buf,
-			       UT_LIST_GET_FIRST(log_sys->log_groups),
+	log_group_read_log_seg(log_sys->buf, &log_sys->log,
 			       start_lsn, start_lsn + OS_FILE_LOG_BLOCK_SIZE);
 
-	ut_ad(UT_LIST_GET_LEN(log_sys->log_groups) == 1);
+	/* Update the fields in the group struct to correspond to
+	recovered_lsn */
 
-	for (log_group_t* group = UT_LIST_GET_FIRST(log_sys->log_groups);
-	     group;
-	     group = UT_LIST_GET_NEXT(log_groups, group)) {
-		/* Update the fields in the group struct to correspond to
-		recovered_lsn */
-
-		log_group_set_fields(group, recovered_lsn);
-	}
+	log_group_set_fields(&log_sys->log, recovered_lsn);
 
 	/* Copy the checkpoint info to the log; remember that we have
 	incremented checkpoint_no by one, and the info will not be written
@@ -829,17 +824,14 @@ recv_check_log_header_checksum(
 @return error code or DB_SUCCESS */
 static MY_ATTRIBUTE((warn_unused_result))
 dberr_t
-recv_find_max_checkpoint_0(
-	log_group_t**	max_group,
-	ulint*		max_field)
+recv_find_max_checkpoint_0(log_group_t** max_group, ulint* max_field)
 {
-	log_group_t*	group = UT_LIST_GET_FIRST(log_sys->log_groups);
+	log_group_t*	group = &log_sys->log;
 	ib_uint64_t	max_no = 0;
 	ib_uint64_t	checkpoint_no;
 	byte*		buf	= log_sys->checkpoint_buf;
 
 	ut_ad(group->format == 0);
-	ut_ad(UT_LIST_GET_NEXT(log_groups, group) == NULL);
 
 	/** Offset of the first checkpoint checksum */
 	static const uint CHECKSUM_1 = 288;
@@ -849,6 +841,8 @@ recv_find_max_checkpoint_0(
 	static const uint OFFSET_HIGH32 = CHECKSUM_2 + 12;
 	/** Least significant bits of the checkpoint offset */
 	static const uint OFFSET_LOW32 = 16;
+
+	*max_group = NULL;
 
 	for (ulint field = LOG_CHECKPOINT_1; field <= LOG_CHECKPOINT_2;
 	     field += LOG_CHECKPOINT_2 - LOG_CHECKPOINT_1) {
@@ -881,9 +875,8 @@ recv_find_max_checkpoint_0(
 		}
 
 		DBUG_PRINT("ib_log",
-			   ("checkpoint " UINT64PF " at " LSN_PF
-			    " found in group " ULINTPF,
-			    checkpoint_no, group->lsn, group->id));
+			   ("checkpoint " UINT64PF " at " LSN_PF " found",
+			    checkpoint_no, group->lsn));
 
 		if (checkpoint_no >= max_no) {
 			*max_group = group;
@@ -914,7 +907,7 @@ dberr_t
 recv_log_format_0_recover(lsn_t lsn)
 {
 	log_mutex_enter();
-	log_group_t*	group = UT_LIST_GET_FIRST(log_sys->log_groups);
+	log_group_t*	group = &log_sys->log;
 	const lsn_t	source_offset
 		= log_group_calc_lsn_offset(lsn, group);
 	log_mutex_exit();
@@ -930,7 +923,7 @@ recv_log_format_0_recover(lsn_t lsn)
 		REFMAN "upgrading.html";
 
 	fil_io(IORequestLogRead, true,
-	       page_id_t(group->space_id, page_no),
+	       page_id_t(SRV_LOG_SPACE_FIRST_ID, page_no),
 	       univ_page_size,
 	       (ulint) ((source_offset & ~(OS_FILE_LOG_BLOCK_SIZE - 1))
 			% univ_page_size.physical()),
@@ -966,14 +959,10 @@ recv_log_format_0_recover(lsn_t lsn)
 }
 
 /** Find the latest checkpoint in the log header.
-@param[out]	max_group	log group, or NULL
 @param[out]	max_field	LOG_CHECKPOINT_1 or LOG_CHECKPOINT_2
 @return error code or DB_SUCCESS */
-static MY_ATTRIBUTE((warn_unused_result))
 dberr_t
-recv_find_max_checkpoint(
-	log_group_t**	max_group,
-	ulint*		max_field)
+recv_find_max_checkpoint(ulint* max_field)
 {
 	log_group_t*	group;
 	ib_uint64_t	max_no;
@@ -981,101 +970,92 @@ recv_find_max_checkpoint(
 	ulint		field;
 	byte*		buf;
 
-	group = UT_LIST_GET_FIRST(log_sys->log_groups);
+	group = &log_sys->log;
 
 	max_no = 0;
-	*max_group = NULL;
 	*max_field = 0;
 
 	buf = log_sys->checkpoint_buf;
 
-	while (group) {
-		group->state = LOG_GROUP_CORRUPTED;
+	group->state = LOG_GROUP_CORRUPTED;
 
-		log_group_header_read(group, 0);
-		/* Check the header page checksum. There was no
-		checksum in the first redo log format (version 0). */
-		group->format = mach_read_from_4(buf + LOG_HEADER_FORMAT);
-		if (group->format != 0
-		    && !recv_check_log_header_checksum(buf)) {
-			ib::error() << "Invalid redo log header checksum.";
-			return(DB_CORRUPTION);
-		}
-
-		switch (group->format) {
-		case 0:
-			return(recv_find_max_checkpoint_0(
-				       max_group, max_field));
-		case LOG_HEADER_FORMAT_CURRENT:
-		case LOG_HEADER_FORMAT_CURRENT | LOG_HEADER_FORMAT_ENCRYPTED:
-			break;
-		default:
-			/* Ensure that the string is NUL-terminated. */
-			buf[LOG_HEADER_CREATOR_END] = 0;
-			ib::error() << "Unsupported redo log format."
-				" The redo log was created"
-				" with " << buf + LOG_HEADER_CREATOR <<
-				". Please follow the instructions at "
-				REFMAN "upgrading-downgrading.html";
-			/* Do not issue a message about a possibility
-			to cleanly shut down the newer server version
-			and to remove the redo logs, because the
-			format of the system data structures may
-			radically change after MySQL 5.7. */
-			return(DB_ERROR);
-		}
-
-		for (field = LOG_CHECKPOINT_1; field <= LOG_CHECKPOINT_2;
-		     field += LOG_CHECKPOINT_2 - LOG_CHECKPOINT_1) {
-
-			log_group_header_read(group, field);
-
-			const ulint crc32 = log_block_calc_checksum_crc32(buf);
-			const ulint cksum = log_block_get_checksum(buf);
-
-			if (crc32 != cksum) {
-				DBUG_PRINT("ib_log",
-					   ("invalid checkpoint,"
-					    " group " ULINTPF " at " ULINTPF
-					    ", checksum %x expected %x",
-					    group->id, field,
-					    (unsigned) cksum,
-					    (unsigned) crc32));
-				continue;
-			}
-
-			if (group->is_encrypted()
-			    && !log_crypt_read_checkpoint_buf(buf)) {
-				ib::error() << "Reading checkpoint"
-					" encryption info failed.";
-				continue;
-			}
-
-			group->state = LOG_GROUP_OK;
-
-			group->lsn = mach_read_from_8(
-				buf + LOG_CHECKPOINT_LSN);
-			group->lsn_offset = mach_read_from_8(
-				buf + LOG_CHECKPOINT_OFFSET);
-			checkpoint_no = mach_read_from_8(
-				buf + LOG_CHECKPOINT_NO);
-
-			DBUG_PRINT("ib_log",
-				   ("checkpoint " UINT64PF " at " LSN_PF
-				    " found in group " ULINTPF,
-				    checkpoint_no, group->lsn, group->id));
-
-			if (checkpoint_no >= max_no) {
-				*max_group = group;
-				*max_field = field;
-				max_no = checkpoint_no;
-			}
-		}
-
-		group = UT_LIST_GET_NEXT(log_groups, group);
+	log_group_header_read(group, 0);
+	/* Check the header page checksum. There was no
+	checksum in the first redo log format (version 0). */
+	group->format = mach_read_from_4(buf + LOG_HEADER_FORMAT);
+	if (group->format != 0
+	    && !recv_check_log_header_checksum(buf)) {
+		ib::error() << "Invalid redo log header checksum.";
+		return(DB_CORRUPTION);
 	}
 
-	if (*max_group == NULL) {
+	switch (group->format) {
+	case 0:
+		return(recv_find_max_checkpoint_0(&group, max_field));
+	case LOG_HEADER_FORMAT_CURRENT:
+	case LOG_HEADER_FORMAT_CURRENT | LOG_HEADER_FORMAT_ENCRYPTED:
+		break;
+	default:
+		/* Ensure that the string is NUL-terminated. */
+		buf[LOG_HEADER_CREATOR_END] = 0;
+		ib::error() << "Unsupported redo log format."
+			" The redo log was created"
+			" with " << buf + LOG_HEADER_CREATOR <<
+			". Please follow the instructions at "
+			REFMAN "upgrading-downgrading.html";
+		/* Do not issue a message about a possibility
+		to cleanly shut down the newer server version
+		and to remove the redo logs, because the
+		format of the system data structures may
+		radically change after MySQL 5.7. */
+		return(DB_ERROR);
+	}
+
+	for (field = LOG_CHECKPOINT_1; field <= LOG_CHECKPOINT_2;
+	     field += LOG_CHECKPOINT_2 - LOG_CHECKPOINT_1) {
+
+		log_group_header_read(group, field);
+
+		const ulint crc32 = log_block_calc_checksum_crc32(buf);
+		const ulint cksum = log_block_get_checksum(buf);
+
+		if (crc32 != cksum) {
+			DBUG_PRINT("ib_log",
+				   ("invalid checkpoint,"
+				    " at " ULINTPF
+				    ", checksum " ULINTPFx
+				    " expected " ULINTPFx,
+				    field, cksum, crc32));
+			continue;
+		}
+
+		if (group->is_encrypted()
+		    && !log_crypt_read_checkpoint_buf(buf)) {
+			ib::error() << "Reading checkpoint"
+				" encryption info failed.";
+			continue;
+		}
+
+		group->state = LOG_GROUP_OK;
+
+		group->lsn = mach_read_from_8(
+			buf + LOG_CHECKPOINT_LSN);
+		group->lsn_offset = mach_read_from_8(
+			buf + LOG_CHECKPOINT_OFFSET);
+		checkpoint_no = mach_read_from_8(
+			buf + LOG_CHECKPOINT_NO);
+
+		DBUG_PRINT("ib_log",
+			   ("checkpoint " UINT64PF " at " LSN_PF " found ",
+			    checkpoint_no, group->lsn));
+
+		if (checkpoint_no >= max_no) {
+			*max_field = field;
+			max_no = checkpoint_no;
+		}
+	}
+
+	if (*max_field == 0) {
 		/* Before 5.7.9, we could get here during database
 		initialization if we created an ib_logfile0 file that
 		was filled with zeroes, and were killed. After
@@ -1495,7 +1475,12 @@ parse_log:
 		}
 		break;
 	case MLOG_FILE_WRITE_CRYPT_DATA:
-		ptr = const_cast<byte*>(fil_parse_write_crypt_data(ptr, end_ptr, block));
+		dberr_t err;
+		ptr = const_cast<byte*>(fil_parse_write_crypt_data(ptr, end_ptr, block, &err));
+
+		if (err != DB_SUCCESS) {
+			recv_sys->found_corrupt_log = TRUE;
+		}
 		break;
 	default:
 		ptr = NULL;
@@ -1791,8 +1776,7 @@ recv_recover_page(bool just_read_in, buf_block_t* block)
 	while (recv) {
 		end_lsn = recv->end_lsn;
 
-		ut_ad(end_lsn
-		      <= UT_LIST_GET_FIRST(log_sys->log_groups)->scanned_lsn);
+		ut_ad(end_lsn <= log_sys->log.scanned_lsn);
 
 		if (recv->len > RECV_DATA_BLOCK_SIZE) {
 			/* We have to copy the record body to a separate
@@ -1991,6 +1975,11 @@ recv_apply_hashed_log_recs(bool last_batch)
 			break;
 		}
 
+		if (recv_sys->found_corrupt_log) {
+			mutex_exit(&recv_sys->mutex);
+			return;
+		}
+
 		mutex_exit(&recv_sys->mutex);
 		os_thread_sleep(500000);
 	}
@@ -2073,6 +2062,10 @@ recv_apply_hashed_log_recs(bool last_batch)
 	while (recv_sys->n_addrs != 0) {
 
 		mutex_exit(&(recv_sys->mutex));
+
+		if (recv_sys->found_corrupt_log) {
+			return;
+		}
 
 		os_thread_sleep(500000);
 
@@ -2480,6 +2473,8 @@ loop:
 
 		ulint	total_len	= 0;
 		ulint	n_recs		= 0;
+		bool	only_mlog_file	= true;
+		ulint	mlog_rec_len	= 0;
 
 		for (;;) {
 			len = recv_parse_log_rec(
@@ -2508,6 +2503,22 @@ loop:
 				= recv_sys->recovered_offset + total_len;
 			recv_previous_parsed_rec_is_multi = 1;
 
+			/* MLOG_FILE_NAME redo log records doesn't make changes
+			to persistent data. If only MLOG_FILE_NAME redo
+			log record exists then reset the parsing buffer pointer
+			by changing recovered_lsn and recovered_offset. */
+			if (type != MLOG_FILE_NAME && only_mlog_file == true) {
+				only_mlog_file = false;
+			}
+
+			if (only_mlog_file) {
+				new_recovered_lsn = recv_calc_lsn_on_data_add(
+					recv_sys->recovered_lsn, len);
+				mlog_rec_len += len;
+				recv_sys->recovered_offset += len;
+				recv_sys->recovered_lsn = new_recovered_lsn;
+			}
+
 			total_len += len;
 			n_recs++;
 
@@ -2521,6 +2532,7 @@ loop:
 					    " n=" ULINTPF,
 					    recv_sys->recovered_lsn,
 					    total_len, n_recs));
+				total_len -= mlog_rec_len;
 				break;
 			}
 
@@ -2740,6 +2752,7 @@ recv_scan_log_recs(
 	ulint		data_len;
 	bool		more_data	= false;
 	bool		apply		= recv_sys->mlog_checkpoint_lsn != 0;
+	ulint		recv_parsing_buf_size = RECV_PARSING_BUF_SIZE;
 
 	ut_ad(start_lsn % OS_FILE_LOG_BLOCK_SIZE == 0);
 	ut_ad(end_lsn % OS_FILE_LOG_BLOCK_SIZE == 0);
@@ -2812,8 +2825,14 @@ recv_scan_log_recs(
 			parsing buffer if parse_start_lsn is already
 			non-zero */
 
+			DBUG_EXECUTE_IF(
+				"reduce_recv_parsing_buf",
+				recv_parsing_buf_size
+					= (70 * 1024);
+				);
+
 			if (recv_sys->len + 4 * OS_FILE_LOG_BLOCK_SIZE
-			    >= RECV_PARSING_BUF_SIZE) {
+			    >= recv_parsing_buf_size) {
 				ib::error() << "Log parsing buffer overflow."
 					" Recovery may have failed!";
 
@@ -2863,7 +2882,7 @@ recv_scan_log_recs(
 			*store_to_hash = STORE_NO;
 		}
 
-		if (recv_sys->recovered_offset > RECV_PARSING_BUF_SIZE / 4) {
+		if (recv_sys->recovered_offset > recv_parsing_buf_size / 4) {
 			/* Move parsing buffer data to the buffer start */
 
 			recv_sys_justify_left_parsing_buf();
@@ -2946,10 +2965,9 @@ recv_group_scan_log_recs(
 		DBUG_RETURN(false);
 	}
 
-	DBUG_PRINT("ib_log", ("%s " LSN_PF
-			      " completed for log group " ULINTPF,
+	DBUG_PRINT("ib_log", ("%s " LSN_PF " completed",
 			      last_phase ? "rescan" : "scan",
-			      group->scanned_lsn, group->id));
+			      group->scanned_lsn));
 
 	DBUG_RETURN(store_to_hash == STORE_NO);
 }
@@ -2986,7 +3004,7 @@ recv_init_missing_space(dberr_t err, const recv_spaces_t::const_iterator& i)
 @return error code or DB_SUCCESS */
 static MY_ATTRIBUTE((warn_unused_result))
 dberr_t
-recv_init_crash_recovery_spaces(void)
+recv_init_crash_recovery_spaces()
 {
 	typedef std::set<ulint>	space_set_t;
 	bool		flag_deleted	= false;
@@ -3100,11 +3118,9 @@ recv_init_crash_recovery_spaces(void)
 of first system tablespace page
 @return error code or DB_SUCCESS */
 dberr_t
-recv_recovery_from_checkpoint_start(
-	lsn_t	flush_lsn)
+recv_recovery_from_checkpoint_start(lsn_t flush_lsn)
 {
 	log_group_t*	group;
-	log_group_t*	max_cp_group;
 	ulint		max_cp_field;
 	lsn_t		checkpoint_lsn;
 	bool		rescan;
@@ -3130,14 +3146,14 @@ recv_recovery_from_checkpoint_start(
 
 	/* Look for the latest checkpoint from any of the log groups */
 
-	err = recv_find_max_checkpoint(&max_cp_group, &max_cp_field);
+	err = recv_find_max_checkpoint(&max_cp_field);
 
 	if (err != DB_SUCCESS) {
 		log_mutex_exit();
 		return(err);
 	}
 
-	log_group_header_read(max_cp_group, max_cp_field);
+	log_group_header_read(&log_sys->log, max_cp_field);
 
 	buf = log_sys->checkpoint_buf;
 
@@ -3152,8 +3168,7 @@ recv_recovery_from_checkpoint_start(
 
 	ut_ad(RECV_SCAN_SIZE <= log_sys->buf_size);
 
-	ut_ad(UT_LIST_GET_LEN(log_sys->log_groups) == 1);
-	group = UT_LIST_GET_FIRST(log_sys->log_groups);
+	group = &log_sys->log;
 	const lsn_t	end_lsn = mach_read_from_8(
 		buf + LOG_CHECKPOINT_END_LSN);
 
@@ -3441,11 +3456,8 @@ recv_reset_logs(
 
 	log_sys->lsn = ut_uint64_align_up(lsn, OS_FILE_LOG_BLOCK_SIZE);
 
-	for (log_group_t* group = UT_LIST_GET_FIRST(log_sys->log_groups);
-	     group; group = UT_LIST_GET_NEXT(log_groups, group)) {
-		group->lsn = log_sys->lsn;
-		group->lsn_offset = LOG_FILE_HDR_SIZE;
-	}
+	log_sys->log.lsn = log_sys->lsn;
+	log_sys->log.lsn_offset = LOG_FILE_HDR_SIZE;
 
 	log_sys->buf_next_to_write = 0;
 	log_sys->write_lsn = log_sys->lsn;

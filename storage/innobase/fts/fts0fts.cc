@@ -1,7 +1,7 @@
 /*****************************************************************************
 
 Copyright (c) 2011, 2016, Oracle and/or its affiliates. All Rights Reserved.
-Copyright (c) 2016, MariaDB Corporation. All Rights reserved.
+Copyright (c) 2016, 2017, MariaDB Corporation.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -93,6 +93,7 @@ static const ulint FTS_DEADLOCK_RETRY_WAIT = 100000;
 /** variable to record innodb_fts_internal_tbl_name for information
 schema table INNODB_FTS_INSERTED etc. */
 char* fts_internal_tbl_name		= NULL;
+char* fts_internal_tbl_name2		= NULL;
 
 /** InnoDB default stopword list:
 There are different versions of stopwords, the stop words listed
@@ -1199,7 +1200,6 @@ fts_tokenizer_word_get(
 	/* If it is a stopword, do not index it */
 	if (!fts_check_token(text,
 		    cache->stopword_info.cached_stopword,
-		    index_cache->index->is_ngram,
 		    index_cache->charset)) {
 
 		return(NULL);
@@ -1715,21 +1715,6 @@ fts_drop_tables(
 	return(error);
 }
 
-/** Extract only the required flags from table->flags2 for FTS Aux
-tables.
-@param[in]	in_flags2	Table flags2
-@return extracted flags2 for FTS aux tables */
-static inline
-ulint
-fts_get_table_flags2_for_aux_tables(
-	ulint	flags2)
-{
-	/* Extract the file_per_table flag & temporary file flag
-	from the main FTS table flags2 */
-	return((flags2 & DICT_TF2_USE_FILE_PER_TABLE) |
-	       (flags2 & DICT_TF2_TEMPORARY));
-}
-
 /** Create dict_table_t object for FTS Aux tables.
 @param[in]	aux_table_name	FTS Aux table name
 @param[in]	table		table object of FTS Index
@@ -1744,7 +1729,9 @@ fts_create_in_mem_aux_table(
 {
 	dict_table_t*	new_table = dict_mem_table_create(
 		aux_table_name, table->space, n_cols, 0, 0, table->flags,
-		fts_get_table_flags2_for_aux_tables(table->flags2));
+		table->space == TRX_SYS_SPACE
+		? 0 : table->space == SRV_TMP_SPACE_ID
+		? DICT_TF2_TEMPORARY : DICT_TF2_USE_FILE_PER_TABLE);
 
 	if (DICT_TF_HAS_DATA_DIR(table->flags)) {
 		ut_ad(table->data_dir_path != NULL);
@@ -2542,7 +2529,7 @@ fts_get_max_cache_size(
 {
 	dberr_t		error;
 	fts_string_t	value;
-	ulint		cache_size_in_mb;
+	ulong		cache_size_in_mb;
 
 	/* Set to the default value. */
 	cache_size_in_mb = FTS_CACHE_SIZE_LOWER_LIMIT_IN_MB;
@@ -3240,7 +3227,6 @@ fts_query_expansion_fetch_doc(
 		}
 
 		doc.charset = doc_charset;
-		doc.is_ngram = result_doc->is_ngram;
 
 		if (dfield_is_ext(dfield)) {
 			/* We ignore columns that are stored externally, this
@@ -3349,7 +3335,6 @@ fts_fetch_doc_from_rec(
 
 		doc->found = TRUE;
 		doc->charset = get_doc->index_cache->charset;
-		doc->is_ngram = index->is_ngram;
 
 		/* Null Field */
 		if (doc->text.f_len == UNIV_SQL_NULL || doc->text.f_len == 0) {
@@ -4381,13 +4366,10 @@ fts_sync_table(
 	return(err);
 }
 
-/** Check fts token
-1. for ngram token, check whether the token contains any words in stopwords
-2. for non-ngram token, check if it's stopword or less than fts_min_token_size
+/** Check if a fts token is a stopword or less than fts_min_token_size
 or greater than fts_max_token_size.
 @param[in]	token		token string
 @param[in]	stopwords	stopwords rb tree
-@param[in]	is_ngram	is ngram parser
 @param[in]	cs		token charset
 @retval	true	if it is not stopword and length in range
 @retval	false	if it is stopword or lenght not in range */
@@ -4395,96 +4377,16 @@ bool
 fts_check_token(
 	const fts_string_t*		token,
 	const ib_rbt_t*			stopwords,
-	bool				is_ngram,
 	const CHARSET_INFO*		cs)
 {
 	ut_ad(cs != NULL || stopwords == NULL);
 
-	if (!is_ngram) {
-		ib_rbt_bound_t  parent;
+	ib_rbt_bound_t  parent;
 
-		if (token->f_n_char < fts_min_token_size
-		    || token->f_n_char > fts_max_token_size
-		    || (stopwords != NULL
-			&& rbt_search(stopwords, &parent, token) == 0)) {
-			return(false);
-		} else {
-			return(true);
-		}
-	}
-
-	/* Check token for ngram. */
-	DBUG_EXECUTE_IF(
-		"fts_instrument_ignore_ngram_check",
-		return(true);
-	);
-
-	/* We ignore fts_min_token_size when ngram */
-	ut_ad(token->f_n_char > 0
-	      && token->f_n_char <= fts_max_token_size);
-
-	if (stopwords == NULL) {
-		return(true);
-	}
-
-	/*Ngram checks whether the token contains any words in stopwords.
-	We can't simply use CONTAIN to search in stopwords, because it's
-	built on COMPARE. So we need to tokenize the token into words
-	from unigram to f_n_char, and check them separately. */
-	for (ulint ngram_token_size = 1; ngram_token_size <= token->f_n_char;
-	     ngram_token_size ++) {
-		const char*	start;
-		const char*	next;
-		const char*	end;
-		ulint		char_len;
-		ulint		n_chars;
-
-		start = reinterpret_cast<char*>(token->f_str);
-		next = start;
-		end = start + token->f_len;
-		n_chars = 0;
-
-		while (next < end) {
-			char_len = my_charlen(cs, next, end);
-
-			if (next + char_len > end || char_len == 0) {
-				break;
-			} else {
-				/* Skip SPACE */
-				if (char_len == 1 && *next == ' ') {
-					start = next + 1;
-					next = start;
-					n_chars = 0;
-
-					continue;
-				}
-
-				next += char_len;
-				n_chars++;
-			}
-
-			if (n_chars == ngram_token_size) {
-				fts_string_t	ngram_token;
-				ngram_token.f_str =
-					reinterpret_cast<byte*>(
-					const_cast<char*>(start));
-				ngram_token.f_len = next - start;
-				ngram_token.f_n_char = ngram_token_size;
-
-				ib_rbt_bound_t  parent;
-				if (rbt_search(stopwords, &parent,
-					       &ngram_token) == 0) {
-					return(false);
-				}
-
-				/* Move a char forward */
-				start += my_charlen(cs, start, end);
-				n_chars = ngram_token_size - 1;
-			}
-		}
-	}
-
-	return(true);
+	return(token->f_n_char >= fts_min_token_size
+	       && token->f_n_char <= fts_max_token_size
+	       && (stopwords == NULL
+		   || rbt_search(stopwords, &parent, token) != 0));
 }
 
 /** Add the token and its start position to the token's list of positions.
@@ -4501,8 +4403,7 @@ fts_add_token(
 	/* Ignore string whose character number is less than
 	"fts_min_token_size" or more than "fts_max_token_size" */
 
-	if (fts_check_token(&str, NULL, result_doc->is_ngram,
-			    result_doc->charset)) {
+	if (fts_check_token(&str, NULL, result_doc->charset)) {
 
 		mem_heap_t*	heap;
 		fts_string_t	t_str;
@@ -6499,6 +6400,36 @@ fts_check_corrupt_index(
 	return(0);
 }
 
+/* Get parent table name if it's a fts aux table
+@param[in]	aux_table_name	aux table name
+@param[in]	aux_table_len	aux table length
+@return parent table name, or NULL */
+char*
+fts_get_parent_table_name(
+	const char*	aux_table_name,
+	ulint		aux_table_len)
+{
+	fts_aux_table_t	aux_table;
+	char*		parent_table_name = NULL;
+
+	if (fts_is_aux_table_name(&aux_table, aux_table_name, aux_table_len)) {
+		dict_table_t*	parent_table;
+
+		parent_table = dict_table_open_on_id(
+			aux_table.parent_id, TRUE, DICT_TABLE_OP_NORMAL);
+
+		if (parent_table != NULL) {
+			parent_table_name = mem_strdupl(
+				parent_table->name.m_name,
+				strlen(parent_table->name.m_name));
+
+			dict_table_close(parent_table, TRUE, FALSE);
+		}
+	}
+
+	return(parent_table_name);
+}
+
 /** Check the validity of the parent table.
 @param[in]	aux_table	auxiliary table
 @return true if it is a valid table or false if it is not */
@@ -7459,7 +7390,6 @@ fts_init_recover_doc(
 		}
 
 		doc.charset = get_doc->index_cache->charset;
-		doc.is_ngram = get_doc->index_cache->index->is_ngram;
 
 		if (dfield_is_ext(dfield)) {
 			dict_table_t*	table = cache->sync->table;

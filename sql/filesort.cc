@@ -182,12 +182,6 @@ SORT_INFO *filesort(THD *thd, TABLE *table, Filesort *filesort,
 
   outfile= &sort->io_cache;
 
-  /*
-   Release InnoDB's adaptive hash index latch (if holding) before
-   running a sort.
-  */
-  ha_release_temporary_latches(thd);
-
   my_b_clear(&tempfile);
   my_b_clear(&buffpek_pointers);
   buffpek=0;
@@ -569,7 +563,8 @@ const char* dbug_print_table_row(TABLE *table)
     else
       output.append(",");
 
-    output.append((*pfield)->field_name? (*pfield)->field_name: "NULL");
+    output.append((*pfield)->field_name.str ?
+                  (*pfield)->field_name.str: "NULL");
   }
 
   output.append(")=(");
@@ -620,7 +615,8 @@ static void dbug_print_record(TABLE *table, bool print_rowid)
   
   fprintf(DBUG_FILE, "record (");
   for (pfield= table->field; *pfield ; pfield++)
-    fprintf(DBUG_FILE, "%s%s", (*pfield)->field_name, (pfield[1])? ", ":"");
+    fprintf(DBUG_FILE, "%s%s", (*pfield)->field_name.str,
+            (pfield[1])? ", ":"");
   fprintf(DBUG_FILE, ") = ");
 
   fprintf(DBUG_FILE, "(");
@@ -951,6 +947,7 @@ write_keys(Sort_param *param,  SORT_INFO *fs_info, uint count,
   /* check we won't have more buffpeks than we can possibly keep in memory */
   if (my_b_tell(buffpek_pointers) + sizeof(BUFFPEK) > (ulonglong)UINT_MAX)
     goto err;
+  bzero(&buffpek, sizeof(buffpek));
   buffpek.file_pos= my_b_tell(tempfile);
   if ((ha_rows) count > param->max_rows)
     count=(uint) param->max_rows;               /* purecov: inspected */

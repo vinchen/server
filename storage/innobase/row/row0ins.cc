@@ -1596,6 +1596,10 @@ row_ins_check_foreign_constraint(
 	ulint		offsets_[REC_OFFS_NORMAL_SIZE];
 	ulint*		offsets		= offsets_;
 
+	bool		skip_gap_lock;
+
+	skip_gap_lock = (trx->isolation_level <= TRX_ISO_READ_COMMITTED);
+
 	DBUG_ENTER("row_ins_check_foreign_constraint");
 
 	rec_offs_init(offsets_);
@@ -1652,7 +1656,7 @@ row_ins_check_foreign_constraint(
 	}
 
 	if (check_table == NULL
-	    || check_table->ibd_file_missing
+	    || !check_table->is_readable()
 	    || check_index == NULL) {
 
 		if (!srv_read_only_mode && check_ref) {
@@ -1725,6 +1729,11 @@ row_ins_check_foreign_constraint(
 
 		if (page_rec_is_supremum(rec)) {
 
+			if (skip_gap_lock) {
+
+				continue;
+			}
+
 			err = row_ins_set_shared_rec_lock(LOCK_ORDINARY, block,
 							  rec, check_index,
 							  offsets, thr);
@@ -1740,10 +1749,17 @@ row_ins_check_foreign_constraint(
 		cmp = cmp_dtuple_rec(entry, rec, offsets);
 
 		if (cmp == 0) {
+
+			ulint	lock_type;
+
+			lock_type = skip_gap_lock
+				? LOCK_REC_NOT_GAP
+				: LOCK_ORDINARY;
+
 			if (rec_get_deleted_flag(rec,
 						 rec_offs_comp(offsets))) {
 				err = row_ins_set_shared_rec_lock(
-					LOCK_ORDINARY, block,
+					lock_type, block,
 					rec, check_index, offsets, thr);
 				switch (err) {
 				case DB_SUCCESS_LOCKED_REC:
@@ -1824,9 +1840,13 @@ row_ins_check_foreign_constraint(
 		} else {
 			ut_a(cmp < 0);
 
-			err = row_ins_set_shared_rec_lock(
-				LOCK_GAP, block,
-				rec, check_index, offsets, thr);
+			err = DB_SUCCESS;
+
+			if (!skip_gap_lock) {
+				err = row_ins_set_shared_rec_lock(
+					LOCK_GAP, block,
+					rec, check_index, offsets, thr);
+			}
 
 			switch (err) {
 			case DB_SUCCESS_LOCKED_REC:
@@ -1877,6 +1897,8 @@ do_possible_lock_wait:
 		/* To avoid check_table being dropped, increment counter */
 		my_atomic_addlint(
 			&check_table->n_foreign_key_checks_running, 1);
+
+		trx_kill_blocking(trx);
 
 		lock_wait_suspend_thread(thr);
 
@@ -2255,18 +2277,14 @@ for a clustered index!
 @retval DB_SUCCESS if no error
 @retval DB_DUPLICATE_KEY if error,
 @retval DB_LOCK_WAIT if we have to wait for a lock on a possible duplicate
-record
-@retval DB_SUCCESS_LOCKED_REC if an exact match of the record was found
-in online table rebuild (flags & (BTR_KEEP_SYS_FLAG | BTR_NO_LOCKING_FLAG)) */
+record */
 static MY_ATTRIBUTE((nonnull, warn_unused_result))
 dberr_t
 row_ins_duplicate_error_in_clust(
-/*=============================*/
 	ulint		flags,	/*!< in: undo logging and locking flags */
 	btr_cur_t*	cursor,	/*!< in: B-tree cursor */
 	const dtuple_t*	entry,	/*!< in: entry to insert */
-	que_thr_t*	thr,	/*!< in: query thread */
-	mtr_t*		mtr)	/*!< in: mtr */
+	que_thr_t*	thr)	/*!< in: query thread */
 {
 	dberr_t	err;
 	rec_t*	rec;
@@ -2276,8 +2294,6 @@ row_ins_duplicate_error_in_clust(
 	ulint	offsets_[REC_OFFS_NORMAL_SIZE];
 	ulint*	offsets		= offsets_;
 	rec_offs_init(offsets_);
-
-	UT_NOT_USED(mtr);
 
 	ut_ad(dict_index_is_clust(cursor->index));
 
@@ -2591,8 +2607,14 @@ row_ins_clust_index_entry_low(
 	/* Note that we use PAGE_CUR_LE as the search mode, because then
 	the function will return in both low_match and up_match of the
 	cursor sensible values */
-	btr_pcur_open_low(index, 0, entry, PAGE_CUR_LE, mode, &pcur,
+ 	err = btr_pcur_open_low(index, 0, entry, PAGE_CUR_LE, mode, &pcur,
 			  __FILE__, __LINE__, auto_inc, &mtr);
+	if (err != DB_SUCCESS) {
+		index->table->file_unreadable = true;
+		mtr.commit();
+		goto func_exit;
+	}
+
 	cursor = btr_pcur_get_btr_cur(&pcur);
 	cursor->thr = thr;
 
@@ -2634,7 +2656,7 @@ row_ins_clust_index_entry_low(
 			DB_LOCK_WAIT */
 
 			err = row_ins_duplicate_error_in_clust(
-				flags, cursor, entry, thr, &mtr);
+				flags, cursor, entry, thr);
 		}
 
 		if (err != DB_SUCCESS) {
@@ -2928,7 +2950,7 @@ row_ins_sec_index_entry_low(
 				" used key_id is not available. "
 				" Can't continue reading table.",
 				index->table->name);
-			index->table->is_encrypted = true;
+			index->table->file_unreadable = true;
 		}
 		goto func_exit;
 	}
@@ -3704,10 +3726,10 @@ row_ins_step(
 	it again here. But we must write trx->id to node->trx_id_buf. */
 
 	if (node->table->no_rollback()) {
-		/* No-rollback tables should only be accessed by a
-		single thread at a time. Concurrency control (mutual
-		exclusion) must be guaranteed by the SQL layer. */
-		DBUG_ASSERT(node->table->n_ref_count == 1);
+		/* No-rollback tables should only be written to by a
+		single thread at a time, but there can be multiple
+		concurrent readers. We must hold an open table handle. */
+		DBUG_ASSERT(node->table->n_ref_count > 0);
 		DBUG_ASSERT(node->ins_type == INS_DIRECT);
 		/* No-rollback tables can consist only of a single index. */
 		DBUG_ASSERT(UT_LIST_GET_LEN(node->entry_list) == 1);

@@ -396,7 +396,7 @@ void PFS_engine_table::set_field_enum(Field *f, ulonglong value)
 
 void PFS_engine_table::set_field_timestamp(Field *f, ulonglong value)
 {
-  DBUG_ASSERT(is_timestamp_type(f->real_type()));
+  DBUG_ASSERT(f->type_handler()->is_timestamp_type());
   Field_timestamp *f2= (Field_timestamp*) f;
   f2->store_TIME((long)(value / 1000000), (value % 1000000));
 }
@@ -1372,7 +1372,7 @@ end:
 }
 
 int pfs_discover_table_names(handlerton *hton __attribute__((unused)),
-                             LEX_STRING *db,
+                             LEX_CSTRING *db,
                              MY_DIR *dir __attribute__((unused)),
                              handlerton::discovered_list *result)
 {

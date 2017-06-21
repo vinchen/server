@@ -1,7 +1,7 @@
 /*****************************************************************************
 
 Copyright (c) 2010, 2016, Oracle and/or its affiliates. All Rights Reserved.
-Copyright (c) 2015, 2016, MariaDB Corporation.
+Copyright (c) 2015, 2017, MariaDB Corporation.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -94,7 +94,6 @@ row_merge_create_fts_sort_index(
 	new_index->n_def = FTS_NUM_FIELDS_SORT;
 	new_index->cached = TRUE;
 	new_index->parser = index->parser;
-	new_index->is_ngram = index->is_ngram;
 
 	idx_field = dict_index_get_nth_field(index, 0);
 	charset = fts_index_get_charset(index);
@@ -515,7 +514,6 @@ row_merge_fts_doc_tokenize(
 	ulint		data_size[FTS_NUM_AUX_INDEX];
 	ulint		n_tuple[FTS_NUM_AUX_INDEX];
 	st_mysql_ftparser*	parser;
-	bool			is_ngram;
 
 	t_str.f_n_char = 0;
 	t_ctx->buf_used = 0;
@@ -524,7 +522,6 @@ row_merge_fts_doc_tokenize(
 	memset(data_size, 0, FTS_NUM_AUX_INDEX * sizeof(ulint));
 
 	parser = sort_buf[0]->index->parser;
-	is_ngram = sort_buf[0]->index->is_ngram;
 
 	/* Tokenize the data and add each word string, its corresponding
 	doc id and position to sort buffer */
@@ -570,7 +567,7 @@ row_merge_fts_doc_tokenize(
 
 		/* Ignore string whose character number is less than
 		"fts_min_token_size" or more than "fts_max_token_size" */
-		if (!fts_check_token(&str, NULL, is_ngram, NULL)) {
+		if (!fts_check_token(&str, NULL, NULL)) {
 			if (parser != NULL) {
 				UT_LIST_REMOVE(t_ctx->fts_token_list, fts_token);
 				ut_free(fts_token);
@@ -589,7 +586,7 @@ row_merge_fts_doc_tokenize(
 
 		/* if "cached_stopword" is defined, ignore words in the
 		stopword list */
-		if (!fts_check_token(&str, t_ctx->cached_stopword, is_ngram,
+		if (!fts_check_token(&str, t_ctx->cached_stopword,
 				     doc->charset)) {
 			if (parser != NULL) {
 				UT_LIST_REMOVE(t_ctx->fts_token_list, fts_token);
@@ -946,7 +943,7 @@ loop:
 			goto exit;
 		} else if (retried > 10000) {
 			ut_ad(!doc_item);
-			/* retied too many times and cannot get new record */
+			/* retried too many times and cannot get new record */
 			ib::error() << "FTS parallel sort processed "
 				<< num_doc_processed
 				<< " records, the sort queue has "
@@ -1144,7 +1141,7 @@ fts_parallel_merge(
 	os_event_set(psort_info->psort_common->merge_event);
 	psort_info->child_status = FTS_CHILD_EXITING;
 
-	os_thread_exit();
+	os_thread_exit(false);
 
 	OS_THREAD_DUMMY_RETURN;
 }
@@ -1157,15 +1154,16 @@ row_fts_start_parallel_merge(
 	fts_psort_t*	merge_info)	/*!< in: parallel sort info */
 {
 	int		i = 0;
-	os_thread_id_t	thd_id;
 
 	/* Kick off merge/insert threads */
 	for (i = 0; i <  FTS_NUM_AUX_INDEX; i++) {
 		merge_info[i].psort_id = i;
 		merge_info[i].child_status = 0;
 
-		merge_info[i].thread_hdl = os_thread_create(fts_parallel_merge,
-			(void*) &merge_info[i], &thd_id);
+		merge_info[i].thread_hdl = os_thread_create(
+			fts_parallel_merge,
+			(void*) &merge_info[i],
+			&merge_info[i].thread_hdl);
 	}
 }
 
@@ -1480,10 +1478,9 @@ row_fts_build_sel_tree_level(
 	int	child_left;
 	int	child_right;
 	ulint	i;
-	ulint	num_item;
+	ulint	num_item	= ulint(1) << level;
 
-	start = static_cast<ulint>((1 << level) - 1);
-	num_item = static_cast<ulint>(1 << level);
+	start = num_item - 1;
 
 	for (i = 0; i < num_item;  i++) {
 		child_left = sel_tree[(start + i) * 2 + 1];
@@ -1552,7 +1549,7 @@ row_fts_build_sel_tree(
 		treelevel++;
 	}
 
-	start = (1 << treelevel) - 1;
+	start = (ulint(1) << treelevel) - 1;
 
 	for (i = 0; i < (int) fts_sort_pll_degree; i++) {
 		sel_tree[i + start] = i;
@@ -1673,7 +1670,7 @@ row_fts_merge_insert(
 	}
 
 	if (fts_enable_diag_print) {
-		ib::info() << "InnoDB_FTS: to inserted " << count_diag
+		ib::info() << "InnoDB_FTS: to insert " << count_diag
 			<< " records";
 	}
 

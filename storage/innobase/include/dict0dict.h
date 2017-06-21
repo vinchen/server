@@ -217,7 +217,7 @@ dict_col_copy_type(
 
 /**********************************************************************//**
 Determine bytes of column prefix to be stored in the undo log. Please
-note if the table format is UNIV_FORMAT_A (< UNIV_FORMAT_B), no prefix
+note that if !dict_table_has_atomic_blobs(table), no prefix
 needs to be stored in the undo log.
 @return bytes of column prefix to be stored in the undo log */
 UNIV_INLINE
@@ -1019,6 +1019,16 @@ dict_tf_get_format(
 /*===============*/
 	ulint		flags)		/*!< in: dict_table_t::flags */
 	MY_ATTRIBUTE((warn_unused_result));
+
+/** Determine if a table uses atomic BLOBs (no locally stored prefix).
+@param[in]	table	InnoDB table
+@return whether BLOBs are atomic */
+inline
+bool
+dict_table_has_atomic_blobs(const dict_table_t* table)
+{
+	return(DICT_TF_HAS_ATOMIC_BLOBS(table->flags));
+}
 
 /** Set the various values in a dict_table_t::flags pointer.
 @param[in,out]	flags,		Pointer to a 4 byte Table Flags
@@ -1960,6 +1970,14 @@ ibool
 dict_set_corrupted_by_space(
 /*========================*/
 	ulint		space_id);	/*!< in: space ID */
+
+/** Flag a table with specified space_id encrypted in the data dictionary
+cache
+@param[in]	space_id	Tablespace id */
+UNIV_INTERN
+void
+dict_set_encrypted_by_space(
+	ulint	space_id);
 
 /** Sets merge_threshold in the SYS_INDEXES
 @param[in,out]	index		index

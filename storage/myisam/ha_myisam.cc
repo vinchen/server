@@ -577,7 +577,10 @@ extern "C" {
 
 int killed_ptr(HA_CHECK *param)
 {
-  return thd_killed((THD*)param->thd);
+  if (likely(thd_killed((THD*)param->thd)) == 0)
+    return 0;
+  my_errno= HA_ERR_ABORTED_BY_USER;
+  return 1;
 }
 
 void mi_check_print_error(HA_CHECK *param, const char *fmt,...)
@@ -850,6 +853,10 @@ int ha_myisam::open(const char *name, int mode, uint test_if_locked)
   /* Count statistics of usage for newly open normal files */
   if (file->s->reopen == 1 && ! (test_if_locked & HA_OPEN_TMP_TABLE))
   {
+    /* use delay_key_write from .frm, not .MYI */
+    file->s->delay_key_write= delay_key_write_options == DELAY_KEY_WRITE_ALL ||
+                             (delay_key_write_options == DELAY_KEY_WRITE_ON &&
+                       table->s->db_create_options & HA_OPTION_DELAY_KEY_WRITE);
     if (file->s->delay_key_write)
       feature_files_opened_with_delayed_keys++;
   }
@@ -1176,9 +1183,6 @@ int ha_myisam::repair(THD *thd, HA_CHECK &param, bool do_optimize)
   share->state.dupp_key= MI_MAX_KEY;
   strmov(fixed_name,file->filename);
 
-  // Release latches since this can take a long time
-  ha_release_temporary_latches(thd);
-
   /*
     Don't lock tables if we have used LOCK TABLE or if we come from
     enable_index()
@@ -1214,6 +1218,11 @@ int ha_myisam::repair(THD *thd, HA_CHECK &param, bool do_optimize)
     if (remap)
       mi_munmap_file(file);
 #endif
+    /*
+      The following is to catch errors when my_errno is no set properly
+      during repairt
+    */
+    my_errno= 0;
     if (mi_test_if_sort_rep(file,file->state->records,tmp_key_map,0) &&
 	(local_testflag & T_REP_BY_SORT))
     {
@@ -1236,8 +1245,11 @@ int ha_myisam::repair(THD *thd, HA_CHECK &param, bool do_optimize)
       }
       if (error && file->create_unique_index_by_sort && 
           share->state.dupp_key != MAX_KEY)
+      {
+        my_errno= HA_ERR_FOUND_DUPP_KEY;
         print_keydup_error(table, &table->key_info[share->state.dupp_key],
                            MYF(0));
+      }
     }
     else
     {
@@ -1328,6 +1340,7 @@ int ha_myisam::assign_to_keycache(THD* thd, HA_CHECK_OPT *check_opt)
 {
   KEY_CACHE *new_key_cache= check_opt->key_cache;
   const char *errmsg= 0;
+  char buf[STRING_BUFFER_USUAL_SIZE];
   int error= HA_ADMIN_OK;
   ulonglong map;
   TABLE_LIST *table_list= table->pos_in_table_list;
@@ -1344,7 +1357,6 @@ int ha_myisam::assign_to_keycache(THD* thd, HA_CHECK_OPT *check_opt)
 
   if ((error= mi_assign_to_key_cache(file, map, new_key_cache)))
   { 
-    char buf[STRING_BUFFER_USUAL_SIZE];
     my_snprintf(buf, sizeof(buf),
 		"Failed to flush to index file (errno: %d)", error);
     errmsg= buf;
@@ -1689,8 +1701,9 @@ void ha_myisam::start_bulk_insert(ha_rows rows, uint flags)
   which have been activated by start_bulk_insert().
 
   SYNOPSIS
-    end_bulk_insert()
-    no arguments
+    end_bulk_insert(fatal_error)
+    abort         0 normal end, store everything
+                  1 abort quickly. No need to flush/write anything. Table will be deleted
 
   RETURN
     0     OK
@@ -1699,10 +1712,20 @@ void ha_myisam::start_bulk_insert(ha_rows rows, uint flags)
 
 int ha_myisam::end_bulk_insert()
 {
+  int first_error, error;
+  my_bool abort= file->s->deleting;
   DBUG_ENTER("ha_myisam::end_bulk_insert");
-  mi_end_bulk_insert(file);
-  int err=mi_extra(file, HA_EXTRA_NO_CACHE, 0);
-  if (!err && !file->s->deleting)
+
+  if ((first_error= mi_end_bulk_insert(file, abort)))
+    abort= 1;
+
+  if ((error= mi_extra(file, HA_EXTRA_NO_CACHE, 0)))
+  {
+    first_error= first_error ? first_error : error;
+    abort= 1;
+  }
+
+  if (!abort)
   {
     if (can_enable_indexes)
     {
@@ -1713,16 +1736,17 @@ int ha_myisam::end_bulk_insert()
         setting the indexes as active and  trying to recreate them. 
      */
    
-      if (((err= enable_indexes(HA_KEY_SWITCH_NONUNIQ_SAVE)) != 0) && 
+      if (((first_error= enable_indexes(HA_KEY_SWITCH_NONUNIQ_SAVE)) != 0) && 
           table->in_use->killed)
       {
         delete_all_rows();
         /* not crashed, despite being killed during repair */
         file->s->state.changed&= ~(STATE_CRASHED|STATE_CRASHED_ON_REPAIR);
       }
-    } 
+    }
   }
-  DBUG_RETURN(err);
+  DBUG_PRINT("exit", ("first_error: %d", first_error));
+  DBUG_RETURN(first_error);
 }
 
 
@@ -1741,7 +1765,7 @@ bool ha_myisam::check_and_repair(THD *thd)
   sql_print_warning("Checking table:   '%s'",table->s->path.str);
 
   const CSET_STRING query_backup= thd->query_string;
-  thd->set_query(table->s->table_name.str,
+  thd->set_query((char*) table->s->table_name.str,
                  (uint) table->s->table_name.length, system_charset_info);
 
   if ((marked_crashed= mi_is_crashed(file)) || check(thd, &check_opt))
@@ -2357,10 +2381,8 @@ bool ha_myisam::check_if_incompatible_data(HA_CREATE_INFO *create_info,
       table_changes & IS_EQUAL_PACK_LENGTH) // Not implemented yet
     return COMPATIBLE_DATA_NO;
 
-  if ((options & (HA_OPTION_PACK_RECORD | HA_OPTION_CHECKSUM |
-		  HA_OPTION_DELAY_KEY_WRITE)) !=
-      (create_info->table_options & (HA_OPTION_PACK_RECORD | HA_OPTION_CHECKSUM |
-			      HA_OPTION_DELAY_KEY_WRITE)))
+  if ((options & (HA_OPTION_PACK_RECORD | HA_OPTION_CHECKSUM)) !=
+      (create_info->table_options & (HA_OPTION_PACK_RECORD | HA_OPTION_CHECKSUM)))
     return COMPATIBLE_DATA_NO;
   return COMPATIBLE_DATA_YES;
 }
@@ -2575,7 +2597,7 @@ maria_declare_plugin_end;
     @retval FALSE An error occurred
 */
 
-my_bool ha_myisam::register_query_cache_table(THD *thd, char *table_name,
+my_bool ha_myisam::register_query_cache_table(THD *thd, const char *table_name,
                                               uint table_name_len,
                                               qc_engine_callback
                                               *engine_callback,

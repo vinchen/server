@@ -1,5 +1,5 @@
 /* Copyright (c) 2000, 2013, Oracle and/or its affiliates.
-   Copyright (c) 2010, 2013, Monty Program Ab
+   Copyright (c) 2010, 2017, MariaDB Corporation
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -1466,12 +1466,6 @@ def_week_frmt: %lu, in_trans: %d, autocommit: %d",
                           (int)flags.autocommit));
 
     /*
-     Make InnoDB to release the adaptive hash index latch before
-     acquiring the query cache mutex.
-    */
-    ha_release_temporary_latches(thd);
-
-    /*
       A table- or a full flush operation can potentially take a long time to
       finish. We choose not to wait for them and skip caching statements
       instead.
@@ -2336,7 +2330,7 @@ void Query_cache::invalidate(THD *thd, const char *key, uint32  key_length,
    Remove all cached queries that uses the given database.
 */
 
-void Query_cache::invalidate(THD *thd, char *db)
+void Query_cache::invalidate(THD *thd, const char *db)
 {
   DBUG_ENTER("Query_cache::invalidate (db)");
   if (is_disabled())

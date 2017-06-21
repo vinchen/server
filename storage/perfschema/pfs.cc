@@ -1236,7 +1236,7 @@ static enum_operation_type socket_operation_map[]=
   @param [out] output_length  Length of the resulting output string.
   @return 0 for success, non zero for errors
 */
-static int build_prefix(const LEX_STRING *prefix, const char *category,
+static int build_prefix(const LEX_CSTRING *prefix, const char *category,
                         char *output, int *output_length)
 {
   int len= strlen(category);
@@ -3953,9 +3953,11 @@ static PSI_file* end_file_open_wait_v1(PSI_file_locker *locker,
   switch (state->m_operation)
   {
   case PSI_FILE_STAT:
+  case PSI_FILE_RENAME:
     break;
   case PSI_FILE_STREAM_OPEN:
   case PSI_FILE_CREATE:
+  case PSI_FILE_OPEN:
     if (result != NULL)
     {
       PFS_file_class *klass= reinterpret_cast<PFS_file_class*> (state->m_class);
@@ -3966,7 +3968,6 @@ static PSI_file* end_file_open_wait_v1(PSI_file_locker *locker,
       state->m_file= reinterpret_cast<PSI_file*> (pfs_file);
     }
     break;
-  case PSI_FILE_OPEN:
   default:
     DBUG_ASSERT(false);
     break;

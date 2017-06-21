@@ -1,8 +1,8 @@
 /***********************************************************************
 
-Copyright (c) 1995, 2016, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 1995, 2017, Oracle and/or its affiliates. All Rights Reserved.
 Copyright (c) 2009, Percona Inc.
-Copyright (c) 2012, 2017, MariaDB Corporation.
+Copyright (c) 2013, 2017, MariaDB Corporation.
 
 Portions of this file contain modifications contributed and copyrighted
 by Percona Inc.. Those modifications are
@@ -226,7 +226,7 @@ struct Slot {
 	os_offset_t		offset;
 
 	/** file where to read or write */
-	os_file_t		file;
+	pfs_os_file_t		file;
 
 	/** file name or path */
 	const char*		name;
@@ -319,7 +319,7 @@ public:
 		IORequest&	type,
 		fil_node_t*	m1,
 		void*		m2,
-		os_file_t	file,
+		pfs_os_file_t	file,
 		const char*	name,
 		void*		buf,
 		os_offset_t	offset,
@@ -362,7 +362,7 @@ public:
 	void print(FILE* file);
 
 	/** @return the number of slots per segment */
-	unsigned slots_per_segment() const
+	ulint slots_per_segment() const
 		MY_ATTRIBUTE((warn_unused_result))
 	{
 		return(m_slots.size() / m_n_segments);
@@ -687,10 +687,6 @@ ulint	os_n_fsyncs;
 static ulint	os_n_file_reads_old;
 static ulint	os_n_file_writes_old;
 static ulint	os_n_fsyncs_old;
-/** Number of pending write operations */
-ulint	os_n_pending_writes;
-/** Number of pending read operations */
-ulint	os_n_pending_reads;
 
 static time_t	os_last_printout;
 bool	os_has_said_disk_full;
@@ -2252,7 +2248,7 @@ AIO::is_linux_native_aio_supported()
 
 		strcpy(name + dirnamelen, "ib_logfile0");
 
-		fd = ::open(name, O_RDONLY);
+		fd = open(name, O_RDONLY);
 
 		if (fd == -1) {
 
@@ -2582,7 +2578,7 @@ A simple function to open or create a file.
 @param[out]	success		true if succeed, false if error
 @return handle to the file, not defined if error, error number
 	can be retrieved with os_file_get_last_error */
-os_file_t
+pfs_os_file_t
 os_file_create_simple_func(
 	const char*	name,
 	ulint		create_mode,
@@ -2590,7 +2586,7 @@ os_file_create_simple_func(
 	bool		read_only,
 	bool*		success)
 {
-	os_file_t	file;
+	pfs_os_file_t	file;
 
 	*success = false;
 
@@ -2660,7 +2656,7 @@ os_file_create_simple_func(
 	bool	retry;
 
 	do {
-		file = ::open(name, create_flag, os_innodb_umask);
+		file = open(name, create_flag, os_innodb_umask);
 
 		if (file == -1) {
 			*success = false;
@@ -2875,7 +2871,7 @@ Opens an existing file or creates a new.
 @param[in]	success		true if succeeded
 @return handle to the file, not defined if error, error number
 	can be retrieved with os_file_get_last_error */
-os_file_t
+pfs_os_file_t
 os_file_create_func(
 	const char*	name,
 	ulint		create_mode,
@@ -2962,7 +2958,7 @@ os_file_create_func(
 	bool		retry;
 
 	do {
-		file = ::open(name, create_flag, os_innodb_umask);
+		file = open(name, create_flag, os_innodb_umask);
 
 		if (file == -1) {
 			const char*	operation;
@@ -3041,7 +3037,7 @@ A simple function to open or create a file.
 @param[out]	success		true if succeeded
 @return own: handle to the file, not defined if error, error number
 	can be retrieved with os_file_get_last_error */
-os_file_t
+pfs_os_file_t
 os_file_create_simple_no_error_handling_func(
 	const char*	name,
 	ulint		create_mode,
@@ -3096,7 +3092,7 @@ os_file_create_simple_no_error_handling_func(
 		return(OS_FILE_CLOSED);
 	}
 
-	file = ::open(name, create_flag, os_innodb_umask);
+	file = open(name, create_flag, os_innodb_umask);
 
 	*success = (file != -1);
 
@@ -3328,8 +3324,8 @@ os_file_get_status_posix(
 	    && (stat_info->type == OS_FILE_TYPE_FILE
 		|| stat_info->type == OS_FILE_TYPE_BLOCK)) {
 
-		int	access = !read_only ? O_RDWR : O_RDONLY;
-		int	fh = ::open(path, access, os_innodb_umask);
+		int	fh = open(path, read_only ? O_RDONLY : O_RDWR,
+				  os_innodb_umask);
 
 		if (fh == -1) {
 			stat_info->rw_perm = false;
@@ -3500,7 +3496,8 @@ SyncFileIO::execute(Slot* slot)
 		/* Wait for async io to complete */
 		ret = GetOverlappedResult(slot->file, &slot->control, &slot->n_bytes, TRUE);
 	}
-	return(ret ? slot->n_bytes : -1);
+
+	return(ret ? static_cast<ssize_t>(slot->n_bytes) : -1);
 }
 
 /* Startup/shutdown */
@@ -3791,7 +3788,7 @@ A simple function to open or create a file.
 @param[out]	success		true if succeed, false if error
 @return handle to the file, not defined if error, error number
 	can be retrieved with os_file_get_last_error */
-os_file_t
+pfs_os_file_t
 os_file_create_simple_func(
 	const char*	name,
 	ulint		create_mode,
@@ -4108,7 +4105,7 @@ Opens an existing file or creates a new.
 @param[in]	success		true if succeeded
 @return handle to the file, not defined if error, error number
 	can be retrieved with os_file_get_last_error */
-os_file_t
+pfs_os_file_t
 os_file_create_func(
 	const char*	name,
 	ulint		create_mode,
@@ -4323,7 +4320,7 @@ A simple function to open or create a file.
 @param[out]	success		true if succeeded
 @return own: handle to the file, not defined if error, error number
 	can be retrieved with os_file_get_last_error */
-os_file_t
+pfs_os_file_t
 os_file_create_simple_no_error_handling_func(
 	const char*	name,
 	ulint		create_mode,
@@ -4945,14 +4942,11 @@ os_file_pwrite(
 
 	++os_n_file_writes;
 
-	(void) my_atomic_addlint(&os_n_pending_writes, 1);
-	MONITOR_ATOMIC_INC(MONITOR_OS_PENDING_WRITES);
-
+	const bool monitor = MONITOR_IS_ON(MONITOR_OS_PENDING_WRITES);
+	MONITOR_ATOMIC_INC_LOW(MONITOR_OS_PENDING_WRITES, monitor);
 	ssize_t	n_bytes = os_file_io(type, file, const_cast<byte*>(buf),
 				     n, offset, err);
-
-	(void) my_atomic_addlint(&os_n_pending_writes, -1);
-	MONITOR_ATOMIC_DEC(MONITOR_OS_PENDING_WRITES);
+	MONITOR_ATOMIC_DEC_LOW(MONITOR_OS_PENDING_WRITES, monitor);
 
 	return(n_bytes);
 }
@@ -5032,13 +5026,10 @@ os_file_pread(
 {
 	++os_n_file_reads;
 
-	(void) my_atomic_addlint(&os_n_pending_reads, 1);
-	MONITOR_ATOMIC_INC(MONITOR_OS_PENDING_READS);
-
+	const bool monitor = MONITOR_IS_ON(MONITOR_OS_PENDING_READS);
+	MONITOR_ATOMIC_INC_LOW(MONITOR_OS_PENDING_READS, monitor);
 	ssize_t	n_bytes = os_file_io(type, file, buf, n, offset, err);
-
-	(void) my_atomic_addlint(&os_n_pending_reads, -1);
-	MONITOR_ATOMIC_DEC(MONITOR_OS_PENDING_READS);
+	MONITOR_ATOMIC_DEC_LOW(MONITOR_OS_PENDING_READS, monitor);
 
 	return(n_bytes);
 }
@@ -5787,7 +5778,7 @@ AIO::init_linux_native_aio()
 	}
 
 	io_context**	ctx = m_aio_ctx;
-	unsigned	max_events = slots_per_segment();
+	ulint		max_events = slots_per_segment();
 
 	for (ulint i = 0; i < m_n_segments; ++i, ++ctx) {
 
@@ -6172,7 +6163,7 @@ AIO::reserve_slot(
 	IORequest&	type,
 	fil_node_t*	m1,
 	void*		m2,
-	os_file_t	file,
+	pfs_os_file_t	file,
 	const char*	name,
 	void*		buf,
 	os_offset_t	offset,
@@ -6564,10 +6555,11 @@ os_aio_windows_handler(
 		/* This read/write does not go through os_file_read
 		and os_file_write APIs, need to register with
 		performance schema explicitly here. */
+		PSI_file_locker_state	state;
 		struct PSI_file_locker* locker = NULL;
 
 		register_pfs_file_io_begin(
-			locker, slot->file, slot->len,
+			&state, locker, slot->file, slot->len,
 			slot->type.is_write()
 			? PSI_FILE_WRITE : PSI_FILE_READ, __FILE__, __LINE__);
 #endif /* UNIV_PFS_IO */
@@ -6625,7 +6617,7 @@ os_aio_func(
 	IORequest&	type,
 	ulint		mode,
 	const char*	name,
-	os_file_t	file,
+	pfs_os_file_t	file,
 	void*		buf,
 	os_offset_t	offset,
 	ulint		n,
@@ -6681,7 +6673,6 @@ try_again:
 			ret = ReadFile(
 				file, slot->ptr, slot->len,
 				&slot->n_bytes, &slot->control);
-
 #elif defined(LINUX_NATIVE_AIO)
 			if (!array->linux_dispatch(slot)) {
 				goto err_exit;
@@ -6700,7 +6691,6 @@ try_again:
 			ret = WriteFile(
 				file, slot->ptr, slot->len,
 				&slot->n_bytes, &slot->control);
-
 #elif defined(LINUX_NATIVE_AIO)
 			if (!array->linux_dispatch(slot)) {
 				goto err_exit;
@@ -7362,7 +7352,7 @@ AIO::print_segment_info(
 				fprintf(file, ", ");
 			}
 
-			fprintf(file, "%lu", *segments);
+			fprintf(file, ULINTPF, *segments);
 		}
 
 		fprintf(file, "] ");
@@ -7443,8 +7433,8 @@ os_aio_print(FILE*	file)
 	double		avg_bytes_read;
 
 	for (ulint i = 0; i < srv_n_file_io_threads; ++i) {
-		fprintf(file, "I/O thread %lu state: %s (%s)",
-			(ulint) i,
+		fprintf(file, "I/O thread " ULINTPF " state: %s (%s)",
+			i,
 			srv_io_thread_op_info[i],
 			srv_io_thread_function[i]);
 
@@ -7467,19 +7457,24 @@ os_aio_print(FILE*	file)
 	time_elapsed = 0.001 + difftime(current_time, os_last_printout);
 
 	fprintf(file,
-		"Pending flushes (fsync) log: %lu; buffer pool: %lu\n"
-		"%lu OS file reads, %lu OS file writes, %lu OS fsyncs\n",
-		(ulint) fil_n_pending_log_flushes,
-		(ulint) fil_n_pending_tablespace_flushes,
-		(ulint) os_n_file_reads,
-		(ulint) os_n_file_writes,
-		(ulint) os_n_fsyncs);
+		"Pending flushes (fsync) log: " ULINTPF
+		"; buffer pool: " ULINTPF "\n"
+		ULINTPF " OS file reads, "
+		ULINTPF " OS file writes, "
+		ULINTPF " OS fsyncs\n",
+		fil_n_pending_log_flushes,
+		fil_n_pending_tablespace_flushes,
+		os_n_file_reads,
+		os_n_file_writes,
+		os_n_fsyncs);
 
-	if (os_n_pending_writes != 0 || os_n_pending_reads != 0) {
+	const ulint n_reads = ulint(MONITOR_VALUE(MONITOR_OS_PENDING_READS));
+	const ulint n_writes = ulint(MONITOR_VALUE(MONITOR_OS_PENDING_WRITES));
+
+	if (n_reads != 0 || n_writes != 0) {
 		fprintf(file,
-			"%lu pending preads, %lu pending pwrites\n",
-			(ulint) os_n_pending_reads,
-			(ulint) os_n_pending_writes);
+			ULINTPF " pending reads, " ULINTPF " pending writes\n",
+			n_reads, n_writes);
 	}
 
 	if (os_n_file_reads == os_n_file_reads_old) {
@@ -7490,7 +7485,7 @@ os_aio_print(FILE*	file)
 	}
 
 	fprintf(file,
-		"%.2f reads/s, %lu avg bytes/read,"
+		"%.2f reads/s, " ULINTPF " avg bytes/read,"
 		" %.2f writes/s, %.2f fsyncs/s\n",
 		(os_n_file_reads - os_n_file_reads_old)
 		/ time_elapsed,
@@ -7545,7 +7540,7 @@ AIO::to_file(FILE* file) const
 {
 	acquire();
 
-	fprintf(file, " %lu\n", static_cast<ulint>(m_n_reserved));
+	fprintf(file, " " ULINTPF "\n", m_n_reserved);
 
 	for (ulint i = 0; i < m_slots.size(); ++i) {
 
@@ -7555,7 +7550,7 @@ AIO::to_file(FILE* file) const
 
 			fprintf(file,
 				"%s IO for %s (offset=" UINT64PF
-				", size=%lu)\n",
+				", size=" ULINTPF ")\n",
 				slot.type.is_read() ? "read" : "write",
 				slot.name, slot.offset, slot.len);
 		}

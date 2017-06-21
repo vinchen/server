@@ -587,7 +587,7 @@ pretty_print_str(String *packet, const char *str, int len)
 */
 
 static char *load_data_tmp_prefix(char *name,
-                                  LEX_STRING *connection_name)
+                                  LEX_CSTRING *connection_name)
 {
   name= strmov(name, PREFIX_SQL_LOAD);
   if (connection_name->length)
@@ -623,7 +623,7 @@ static char *load_data_tmp_prefix(char *name,
 
 static char *slave_load_file_stem(char *buf, uint file_id,
                                   int event_server_id, const char *ext,
-                                  LEX_STRING *connection_name)
+                                  LEX_CSTRING *connection_name)
 {
   char *res;
   res= buf+ unpack_dirname(buf, slave_load_tmpdir);
@@ -644,7 +644,7 @@ static char *slave_load_file_stem(char *buf, uint file_id,
   Delete all temporary files used for SQL_LOAD.
 */
 
-static void cleanup_load_tmpdir(LEX_STRING *connection_name)
+static void cleanup_load_tmpdir(LEX_CSTRING *connection_name)
 {
   MY_DIR *dirp;
   FILEINFO *file;
@@ -3821,8 +3821,8 @@ bool Query_log_event::write()
 
   if (thd && thd->need_binlog_invoker())
   {
-    LEX_STRING user;
-    LEX_STRING host;
+    LEX_CSTRING user;
+    LEX_CSTRING host;
     memset(&user, 0, sizeof(user));
     memset(&host, 0, sizeof(host));
 
@@ -3845,7 +3845,7 @@ bool Query_log_event::write()
       else
       {
         user.str= ctx->priv_role;
-        host= empty_lex_str;
+        host= empty_clex_str;
       }
       user.length= strlen(user.str);
     }
@@ -4499,22 +4499,20 @@ Query_log_event::Query_log_event(const char* buf, uint event_len,
 
   if (user.length)
   {
-    copy_str_and_move((const char **)&(user.str), &start, user.length);
+    copy_str_and_move(&user.str, &start, user.length);
   }
   else
   {
-    user.str= (char *) start++;
-    user.str[0]= '\0';
+    user.str= (char*) start;
+    *(start++)= 0;
   }
 
   if (host.length)
-  {
-    copy_str_and_move((const char **)&(host.str), &start, host.length);
-  }
+    copy_str_and_move(&host.str, &start, host.length);
   else
   {
-    host.str= (char *) start++;
-    host.str[0]= '\0';
+    host.str= (char*) start;
+    *(start++)= 0;
   }
 
   /**
@@ -6559,9 +6557,9 @@ Load_log_event::Load_log_event(THD *thd_arg, sql_exchange *ex,
   while ((item = li++))
   {
     num_fields++;
-    uchar len = (uchar) strlen(item->name);
+    uchar len= (uchar) item->name.length;
     field_block_len += len + 1;
-    fields_buf.append(item->name, len + 1);
+    fields_buf.append(item->name.str, len + 1);
     field_lens_buf.append((char*)&len, 1);
   }
 
@@ -6787,9 +6785,10 @@ void Load_log_event::set_fields(const char* affected_db,
   const char* field = fields;
   for (i= 0; i < num_fields; i++)
   {
+    LEX_CSTRING field_name= {field, field_lens[i] };
     field_list.push_back(new (thd->mem_root)
                          Item_field(thd, context, affected_db, table_name,
-                                    field),
+                                    &field_name),
                          thd->mem_root);
     field+= field_lens[i]  + 1;
   }
@@ -8404,6 +8403,10 @@ int Xid_log_event::do_apply_event(rpl_group_info *rgi)
     Record any GTID in the same transaction, so slave state is transactionally
     consistent.
   */
+#ifdef WITH_WSREP
+  thd->wsrep_affected_rows= 0;
+#endif
+
   if (rgi->gtid_pending)
   {
     sub_id= rgi->gtid_sub_id;
@@ -8906,7 +8909,7 @@ int User_var_log_event::do_apply_event(rpl_group_info *rgi)
 
   if (!(charset= get_charset(charset_number, MYF(MY_WME))))
     DBUG_RETURN(1);
-  LEX_STRING user_var_name;
+  LEX_CSTRING user_var_name;
   user_var_name.str= name;
   user_var_name.length= name_len;
   double real_val;
@@ -8949,7 +8952,7 @@ int User_var_log_event::do_apply_event(rpl_group_info *rgi)
     }
   }
 
-  Item_func_set_user_var *e= new (thd->mem_root) Item_func_set_user_var(thd, user_var_name, it);
+  Item_func_set_user_var *e= new (thd->mem_root) Item_func_set_user_var(thd, &user_var_name, it);
   /*
     Item_func_set_user_var can't substitute something else on its place =>
     0 can be passed as last argument (reference on item)
@@ -8966,7 +8969,7 @@ int User_var_log_event::do_apply_event(rpl_group_info *rgi)
     a single record and with a single column. Thus, like
     a column value, it could always have IMPLICIT derivation.
    */
-  e->update_hash(val, val_len, type, charset,
+  e->update_hash((void*) val, val_len, type, charset,
                  (flags & User_var_log_event::UNSIGNED_F));
   if (!is_deferred())
     free_root(thd->mem_root, 0);
@@ -12521,7 +12524,9 @@ Rows_log_event::write_row(rpl_group_info *rgi,
     TODO: Add safety measures against infinite looping. 
    */
 
-  while ((error= table->file->ha_write_row(table->record[0])))
+  if (table->s->sequence)
+    error= update_sequence();
+  else while ((error= table->file->ha_write_row(table->record[0])))
   {
     if (error == HA_ERR_LOCK_DEADLOCK ||
         error == HA_ERR_LOCK_WAIT_TIMEOUT ||
@@ -12687,6 +12692,33 @@ Rows_log_event::write_row(rpl_group_info *rgi,
 
   DBUG_RETURN(error);
 }
+
+
+int Rows_log_event::update_sequence()
+{
+  TABLE *table= m_table;  // pointer to event's table
+
+  if (!bitmap_is_set(table->rpl_write_set, MIN_VALUE_FIELD_NO))
+  {
+    /* This event come from a setval function executed on the master.
+       Update the sequence next_number and round, like we do with setval()
+    */
+    my_bitmap_map *old_map= dbug_tmp_use_all_columns(table,
+                                                     table->read_set);
+    longlong nextval= table->field[NEXT_FIELD_NO]->val_int();
+    longlong round= table->field[ROUND_FIELD_NO]->val_int();
+    dbug_tmp_restore_column_map(table->read_set, old_map);
+
+    return table->s->sequence->set_value(table, nextval, round, 0);
+  }
+
+  /*
+    Update all fields in table and update the active sequence, like with
+    ALTER SEQUENCE
+  */
+  return table->file->ha_write_row(table->record[0]);
+}
+
 
 #endif
 

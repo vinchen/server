@@ -235,7 +235,7 @@ class ha_innobase: public handler
 	/*
 	  ask handler about permission to cache table during query registration
 	*/
-	my_bool register_query_cache_table(THD *thd, char *table_key,
+	my_bool register_query_cache_table(THD *thd, const char *table_key,
 					   uint key_length,
 					   qc_engine_callback *call_back,
 					   ulonglong *engine_data);
@@ -540,7 +540,7 @@ innobase_index_name_is_reserved(
 	const KEY*	key_info,	/*!< in: Indexes to be created */
 	ulint		num_of_keys)	/*!< in: Number of indexes to
 					be created. */
-	MY_ATTRIBUTE((nonnull, warn_unused_result));
+	MY_ATTRIBUTE((nonnull(1), warn_unused_result));
 
 /*****************************************************************//**
 #ifdef WITH_WSREP

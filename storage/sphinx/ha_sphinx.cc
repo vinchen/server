@@ -216,7 +216,9 @@ enum ESphGroupBy
 	SPH_GROUPBY_WEEK	= 1,	///< group by week
 	SPH_GROUPBY_MONTH	= 2,	///< group by month
 	SPH_GROUPBY_YEAR	= 3,	///< group by year
-	SPH_GROUPBY_ATTR	= 4		///< group by attribute value
+	SPH_GROUPBY_ATTR	= 4,	///< group by attribute value
+	SPH_GROUPBY_ATTRPAIR	= 5,	///< group by sequential attrs pair (rendered redundant by 64bit attrs support; removed)
+	SPH_GROUPBY_MULTIPLE	= 6 	///< group by on multiple attribute values
 };
 
 /// known attribute types
@@ -911,7 +913,7 @@ bool sphinx_show_status ( THD * thd )
 	}
 
 	// show last error or warning (either in addition to stats, or on their own)
-	if ( pTls && pTls->m_pHeadTable && pTls->m_pHeadTable->m_tStats.m_sLastMessage && pTls->m_pHeadTable->m_tStats.m_sLastMessage[0] )
+	if ( pTls && pTls->m_pHeadTable && pTls->m_pHeadTable->m_tStats.m_sLastMessage[0] )
 	{
 		const char * sMessageType = pTls->m_pHeadTable->m_tStats.m_bLastError ? "error" : "warning";
 
@@ -1029,7 +1031,7 @@ static bool ParseUrl ( CSphSEShare * share, TABLE * table, bool bCreate )
 
 			for ( int i=0; i<share->m_iTableFields; i++ )
 			{
-				share->m_sTableField[i] = sphDup ( table->field[i]->field_name );
+				share->m_sTableField[i] = sphDup ( table->field[i]->field_name.str );
 				share->m_eTableFieldType[i] = table->field[i]->type();
 			}
 		}
@@ -1563,6 +1565,7 @@ bool CSphSEQuery::ParseField ( char * sField )
 			{ "month:",	SPH_GROUPBY_MONTH },
 			{ "year:",	SPH_GROUPBY_YEAR },
 			{ "attr:",	SPH_GROUPBY_ATTR },
+			{ "multi:",     SPH_GROUPBY_MULTIPLE }
 		};
 
 		int i;
@@ -2331,7 +2334,7 @@ int ha_sphinx::write_row ( byte * )
 
 	for ( Field ** ppField = table->field; *ppField; ppField++ )
 	{
-		sQuery.append ( (*ppField)->field_name );
+		sQuery.append ( (*ppField)->field_name.str );
 		if ( ppField[1] )
 			sQuery.append ( ", " );
 	}
@@ -3427,7 +3430,7 @@ int ha_sphinx::create ( const char * name, TABLE * table, HA_CREATE_INFO * )
 			if ( eType!=MYSQL_TYPE_TIMESTAMP && !IsIntegerFieldType(eType) && eType!=MYSQL_TYPE_VARCHAR && eType!=MYSQL_TYPE_FLOAT )
 			{
 				my_snprintf ( sError, sizeof(sError), "%s: %dth column (attribute %s) MUST be integer, bigint, timestamp, varchar, or float",
-					name, i+1, table->field[i]->field_name );
+					name, i+1, table->field[i]->field_name.str );
 				break;
 			}
 		}
@@ -3439,10 +3442,10 @@ int ha_sphinx::create ( const char * name, TABLE * table, HA_CREATE_INFO * )
 		if (
 			table->s->keys!=1 ||
 			table->key_info[0].user_defined_key_parts!=1 ||
-			strcasecmp ( table->key_info[0].key_part[0].field->field_name, table->field[2]->field_name ) )
+			strcasecmp ( table->key_info[0].key_part[0].field->field_name.str, table->field[2]->field_name.str ) )
 		{
 			my_snprintf ( sError, sizeof(sError), "%s: there must be an index on '%s' column",
-				name, table->field[2]->field_name );
+				name, table->field[2]->field_name.str );
 			break;
 		}
 
@@ -3457,7 +3460,7 @@ int ha_sphinx::create ( const char * name, TABLE * table, HA_CREATE_INFO * )
 		sError[0] = '\0';
 
 		// check that 1st column is id, is of int type, and has an index
-		if ( strcmp ( table->field[0]->field_name, "id" ) )
+		if ( strcmp ( table->field[0]->field_name.str, "id" ) )
 		{
 			my_snprintf ( sError, sizeof(sError), "%s: 1st column must be called 'id'", name );
 			break;
@@ -3473,7 +3476,7 @@ int ha_sphinx::create ( const char * name, TABLE * table, HA_CREATE_INFO * )
 		if (
 			table->s->keys!=1 ||
 			table->key_info[0].user_defined_key_parts!=1 ||
-			strcasecmp ( table->key_info[0].key_part[0].field->field_name, "id" ) )
+			strcasecmp ( table->key_info[0].key_part[0].field->field_name.str, "id" ) )
 		{
 			my_snprintf ( sError, sizeof(sError), "%s: 'id' column must be indexed", name );
 			break;
@@ -3486,7 +3489,7 @@ int ha_sphinx::create ( const char * name, TABLE * table, HA_CREATE_INFO * )
 			if ( eType!=MYSQL_TYPE_TIMESTAMP && !IsIntegerFieldType(eType) && eType!=MYSQL_TYPE_VARCHAR && eType!=MYSQL_TYPE_FLOAT )
 			{
 				my_snprintf ( sError, sizeof(sError), "%s: column %d(%s) is of unsupported type (use int/bigint/timestamp/varchar/float)",
-					name, i+1, table->field[i]->field_name );
+					name, i+1, table->field[i]->field_name.str );
 				break;
 			}
 		}

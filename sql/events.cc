@@ -1,5 +1,6 @@
 /*
    Copyright (c) 2005, 2013, Oracle and/or its affiliates.
+   Copyright (c) 2017, MariaDB Corporation.
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -99,10 +100,11 @@ ulong Events::inited;
     1   s > t
 */
 
-int sortcmp_lex_string(LEX_STRING s, LEX_STRING t, CHARSET_INFO *cs)
+int sortcmp_lex_string(const LEX_CSTRING *s, const LEX_CSTRING *t,
+                       const CHARSET_INFO *cs)
 {
- return cs->coll->strnncollsp(cs, (uchar *) s.str,s.length,
-                                  (uchar *) t.str,t.length);
+ return cs->coll->strnncollsp(cs, (uchar *) s->str, s->length,
+                                  (uchar *) t->str, t->length);
 }
 
 
@@ -242,6 +244,7 @@ common_1_lev_code:
     break;
   case INTERVAL_WEEK:
     expr/= 7;
+    /* fall through */
   default:
     close_quote= FALSE;
     break;
@@ -352,7 +355,7 @@ Events::create_event(THD *thd, Event_parse_data *parse_data)
   save_binlog_format= thd->set_current_stmt_binlog_format_stmt();
 
   if (thd->lex->create_info.or_replace() && event_queue)
-    event_queue->drop_event(thd, parse_data->dbname, parse_data->name);
+    event_queue->drop_event(thd, &parse_data->dbname, &parse_data->name);
 
   /* On error conditions my_error() is called so no need to handle here */
   if (!(ret= db_repository->create_event(thd, parse_data,
@@ -365,12 +368,12 @@ Events::create_event(THD *thd, Event_parse_data *parse_data)
     {
       if (!(new_element= new Event_queue_element()))
         ret= TRUE;                                // OOM
-      else if ((ret= db_repository->load_named_event(thd, parse_data->dbname,
-                                                     parse_data->name,
+      else if ((ret= db_repository->load_named_event(thd, &parse_data->dbname,
+                                                     &parse_data->name,
                                                      new_element)))
       {
-        if (!db_repository->drop_event(thd, parse_data->dbname,
-                                       parse_data->name, TRUE))
+        if (!db_repository->drop_event(thd, &parse_data->dbname,
+                                       &parse_data->name, TRUE))
           dropped= 1;
         delete new_element;
       }
@@ -438,7 +441,7 @@ Events::create_event(THD *thd, Event_parse_data *parse_data)
 
 bool
 Events::update_event(THD *thd, Event_parse_data *parse_data,
-                     LEX_STRING *new_dbname, LEX_STRING *new_name)
+                     LEX_CSTRING *new_dbname, LEX_CSTRING *new_name)
 {
   int ret;
   enum_binlog_format save_binlog_format;
@@ -468,9 +471,9 @@ Events::update_event(THD *thd, Event_parse_data *parse_data,
   if (new_dbname)                               /* It's a rename */
   {
     /* Check that the new and the old names differ. */
-    if ( !sortcmp_lex_string(parse_data->dbname, *new_dbname,
+    if ( !sortcmp_lex_string(&parse_data->dbname, new_dbname,
                              system_charset_info) &&
-         !sortcmp_lex_string(parse_data->name, *new_name,
+         !sortcmp_lex_string(&parse_data->name, new_name,
                              system_charset_info))
     {
       my_error(ER_EVENT_SAME_NAME, MYF(0));
@@ -511,12 +514,12 @@ Events::update_event(THD *thd, Event_parse_data *parse_data,
   if (!(ret= db_repository->update_event(thd, parse_data,
                                          new_dbname, new_name)))
   {
-    LEX_STRING dbname= new_dbname ? *new_dbname : parse_data->dbname;
-    LEX_STRING name= new_name ? *new_name : parse_data->name;
+    LEX_CSTRING dbname= new_dbname ? *new_dbname : parse_data->dbname;
+    LEX_CSTRING name= new_name ? *new_name : parse_data->name;
 
     if (!(new_element= new Event_queue_element()))
       ret= TRUE;                                // OOM
-    else if ((ret= db_repository->load_named_event(thd, dbname, name,
+    else if ((ret= db_repository->load_named_event(thd, &dbname, &name,
                                                    new_element)))
       delete new_element;
     else
@@ -528,7 +531,7 @@ Events::update_event(THD *thd, Event_parse_data *parse_data,
         it right away.
       */
       if (event_queue)
-        event_queue->update_event(thd, parse_data->dbname, parse_data->name,
+        event_queue->update_event(thd, &parse_data->dbname, &parse_data->name,
                                   new_element);
       /* Binlog the alter event. */
       DBUG_ASSERT(thd->query() && thd->query_length());
@@ -566,7 +569,8 @@ Events::update_event(THD *thd, Event_parse_data *parse_data,
 */
 
 bool
-Events::drop_event(THD *thd, LEX_STRING dbname, LEX_STRING name, bool if_exists)
+Events::drop_event(THD *thd, const LEX_CSTRING *dbname,
+                   const LEX_CSTRING *name, bool if_exists)
 {
   int ret;
   enum_binlog_format save_binlog_format;
@@ -575,7 +579,7 @@ Events::drop_event(THD *thd, LEX_STRING dbname, LEX_STRING name, bool if_exists)
   if (check_if_system_tables_error())
     DBUG_RETURN(TRUE);
 
-  if (check_access(thd, EVENT_ACL, dbname.str, NULL, NULL, 0, 0))
+  if (check_access(thd, EVENT_ACL, dbname->str, NULL, NULL, 0, 0))
     DBUG_RETURN(TRUE);
 
   /*
@@ -585,7 +589,7 @@ Events::drop_event(THD *thd, LEX_STRING dbname, LEX_STRING name, bool if_exists)
   save_binlog_format= thd->set_current_stmt_binlog_format_stmt();
 
   if (lock_object_name(thd, MDL_key::EVENT,
-                       dbname.str, name.str))
+                       dbname->str, name->str))
     DBUG_RETURN(TRUE);
   /* On error conditions my_error() is called so no need to handle here */
   if (!(ret= db_repository->drop_event(thd, dbname, name, if_exists)))
@@ -614,9 +618,9 @@ Events::drop_event(THD *thd, LEX_STRING dbname, LEX_STRING name, bool if_exists)
 */
 
 void
-Events::drop_schema_events(THD *thd, char *db)
+Events::drop_schema_events(THD *thd, const char *db)
 {
-  LEX_STRING const db_lex= { db, strlen(db) };
+  const LEX_CSTRING db_lex= { db, strlen(db) };
 
   DBUG_ENTER("Events::drop_schema_events");
   DBUG_PRINT("enter", ("dropping events from %s", db));
@@ -628,8 +632,8 @@ Events::drop_schema_events(THD *thd, char *db)
     are damaged, as intended.
   */
   if (event_queue)
-    event_queue->drop_schema_events(thd, db_lex);
-  db_repository->drop_schema_events(thd, db_lex);
+    event_queue->drop_schema_events(thd, &db_lex);
+  db_repository->drop_schema_events(thd, &db_lex);
 
   DBUG_VOID_RETURN;
 }
@@ -646,7 +650,7 @@ send_show_create_event(THD *thd, Event_timed *et, Protocol *protocol)
   char show_str_buf[10 * STRING_BUFFER_USUAL_SIZE];
   String show_str(show_str_buf, sizeof(show_str_buf), system_charset_info);
   List<Item> field_list;
-  LEX_STRING sql_mode;
+  LEX_CSTRING sql_mode;
   const String *tz_name;
   MEM_ROOT *mem_root= thd->mem_root;
   DBUG_ENTER("send_show_create_event");
@@ -729,18 +733,19 @@ send_show_create_event(THD *thd, Event_timed *et, Protocol *protocol)
 */
 
 bool
-Events::show_create_event(THD *thd, LEX_STRING dbname, LEX_STRING name)
+Events::show_create_event(THD *thd, const LEX_CSTRING *dbname,
+                          const LEX_CSTRING *name)
 {
   Event_timed et;
   bool ret;
 
   DBUG_ENTER("Events::show_create_event");
-  DBUG_PRINT("enter", ("name: %s@%s", dbname.str, name.str));
+  DBUG_PRINT("enter", ("name: %s@%s", dbname->str, name->str));
 
   if (check_if_system_tables_error())
     DBUG_RETURN(TRUE);
 
-  if (check_access(thd, EVENT_ACL, dbname.str, NULL, NULL, 0, 0))
+  if (check_access(thd, EVENT_ACL, dbname->str, NULL, NULL, 0, 0))
     DBUG_RETURN(TRUE);
 
   /*
@@ -781,8 +786,9 @@ Events::show_create_event(THD *thd, LEX_STRING dbname, LEX_STRING name)
 int
 Events::fill_schema_events(THD *thd, TABLE_LIST *tables, COND * /* cond */)
 {
-  char *db= NULL;
+  const char *db= NULL;
   int ret;
+  char db_tmp[SAFE_NAME_LEN];
   DBUG_ENTER("Events::fill_schema_events");
 
   /*
@@ -806,10 +812,7 @@ Events::fill_schema_events(THD *thd, TABLE_LIST *tables, COND * /* cond */)
         check_access(thd, EVENT_ACL, thd->lex->select_lex.db,
                      NULL, NULL, 0, 0))
       DBUG_RETURN(1);
-    db= thd->lex->select_lex.db;
-
-    if (lower_case_table_names)
-      my_casedn_str(system_charset_info, db);
+    db= normalize_db_name(thd->lex->select_lex.db, db_tmp, sizeof(db_tmp));
   }
   ret= db_repository->fill_schema_events(thd, tables, db);
 

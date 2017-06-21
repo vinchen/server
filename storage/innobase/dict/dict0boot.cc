@@ -1,6 +1,6 @@
 /*****************************************************************************
 
-Copyright (c) 1996, 2016, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 1996, 2017, Oracle and/or its affiliates. All Rights Reserved.
 Copyright (c) 2016, MariaDB Corporation.
 
 This program is free software; you can redistribute it and/or modify it under
@@ -337,8 +337,8 @@ dict_boot(void)
 	dict_mem_table_add_col(table, heap, "ID", DATA_BINARY, 0, 8);
 	/* ROW_FORMAT = (N_COLS >> 31) ? COMPACT : REDUNDANT */
 	dict_mem_table_add_col(table, heap, "N_COLS", DATA_INT, 0, 4);
-	/* The low order bit of TYPE is always set to 1.  If the format
-	is UNIV_FORMAT_B or higher, this field matches table->flags. */
+	/* The low order bit of TYPE is always set to 1.  If ROW_FORMAT
+	is not REDUNDANT or COMPACT, this field matches table->flags. */
 	dict_mem_table_add_col(table, heap, "TYPE", DATA_INT, 0, 4);
 	dict_mem_table_add_col(table, heap, "MIX_ID", DATA_BINARY, 0, 0);
 	/* MIX_LEN may contain additional table flags when
@@ -488,7 +488,9 @@ dict_boot(void)
 	err = ibuf_init_at_db_start();
 
 	if (err == DB_SUCCESS) {
-		if (srv_read_only_mode && !ibuf_is_empty()) {
+		if (srv_read_only_mode
+		    && srv_force_recovery != SRV_FORCE_NO_LOG_REDO
+		    && !ibuf_is_empty()) {
 
 			if (srv_force_recovery < SRV_FORCE_NO_IBUF_MERGE) {
 				ib::error() << "Change buffer must be empty when"

@@ -452,7 +452,7 @@ ha_innobase::check_if_supported_inplace_alter(
 			is TIMESTAMP and it is defined as NOT NULL and
 			it has either constant default or function default
 			we must use "Copy" method. */
-			if (is_timestamp_type(def->sql_type)) {
+			if (def->is_timestamp_type()) {
 				if ((def->flags & NOT_NULL_FLAG) != 0 && // NOT NULL
 					(def->default_value != NULL || // constant default ?
 					 def->unireg_check != Field::NONE)) { // function default
@@ -533,7 +533,7 @@ ha_innobase::check_if_supported_inplace_alter(
 			    && innobase_fulltext_exist(altered_table)
 			    && !my_strcasecmp(
 				    system_charset_info,
-				    key_part->field->field_name,
+				    key_part->field->field_name.str,
 				    FTS_DOC_ID_COL_NAME)) {
 				ha_alter_info->unsupported_reason = innobase_get_err_msg(
 					ER_ALTER_OPERATION_NOT_SUPPORTED_REASON_HIDDEN_FTS);
@@ -590,7 +590,7 @@ ha_innobase::check_if_supported_inplace_alter(
 
 			if (!my_strcasecmp(
 				    system_charset_info,
-				    (*fp)->field_name,
+				    (*fp)->field_name.str,
 				    FTS_DOC_ID_COL_NAME)) {
 				ha_alter_info->unsupported_reason = innobase_get_err_msg(
 					ER_ALTER_OPERATION_NOT_SUPPORTED_REASON_CHANGE_FTS);
@@ -859,7 +859,7 @@ no_match:
 			}
 
 			if (innobase_strcasecmp(col_names[j],
-						key_part.field->field_name)) {
+						key_part.field->field_name.str)) {
 				/* Name mismatch */
 				goto no_match;
 			}
@@ -1515,7 +1515,7 @@ name_ok:
 				}
 
 				my_error(ER_WRONG_KEY_COLUMN, MYF(0), "InnoDB",
-					 field->field_name);
+					 field->field_name.str);
 				return(ER_WRONG_KEY_COLUMN);
 			}
 
@@ -1531,7 +1531,7 @@ name_ok:
 				}
 
 				my_error(ER_WRONG_KEY_COLUMN, MYF(0), "InnoDB",
-					 field->field_name);
+					 field->field_name.str);
 				return(ER_WRONG_KEY_COLUMN);
 			}
 		}
@@ -1570,7 +1570,7 @@ innobase_create_index_field_def(
 	ut_a(field);
 
 	index_field->col_no = key_part->fieldnr;
-	index_field->col_name = altered_table ? field->field_name : fields[key_part->fieldnr]->field_name;
+	index_field->col_name = altered_table ? field->field_name.str : fields[key_part->fieldnr]->field_name.str;
 
 	col_type = get_innobase_type_from_mysql_type(&is_unsigned, field);
 
@@ -1695,19 +1695,19 @@ innobase_fts_check_doc_id_col(
                                  stored_in_db()))
                           sql_idx++;
 		if (my_strcasecmp(system_charset_info,
-				  field->field_name, FTS_DOC_ID_COL_NAME)) {
+				  field->field_name.str, FTS_DOC_ID_COL_NAME)) {
 			continue;
 		}
 
-		if (strcmp(field->field_name, FTS_DOC_ID_COL_NAME)) {
+		if (strcmp(field->field_name.str, FTS_DOC_ID_COL_NAME)) {
 			my_error(ER_WRONG_COLUMN_NAME, MYF(0),
-				 field->field_name);
+				 field->field_name.str);
 		} else if (field->type() != MYSQL_TYPE_LONGLONG
 			   || field->pack_length() != 8
 			   || field->real_maybe_null()
 			   || !(field->flags & UNSIGNED_FLAG)) {
 			my_error(ER_INNODB_FT_WRONG_DOCID_COLUMN, MYF(0),
-				 field->field_name);
+				 field->field_name.str);
 		} else {
 			*fts_doc_col_no = i;
 		}
@@ -1778,7 +1778,7 @@ innobase_fts_check_doc_id_index(
 			if ((key.flags & HA_NOSAME)
 			    && key.user_defined_key_parts == 1
 			    && !strcmp(key.name, FTS_DOC_ID_INDEX_NAME)
-			    && !strcmp(key.key_part[0].field->field_name,
+			    && !strcmp(key.key_part[0].field->field_name.str,
 				       FTS_DOC_ID_COL_NAME)) {
 				if (fts_doc_col_no) {
 					*fts_doc_col_no = ULINT_UNDEFINED;
@@ -1857,7 +1857,7 @@ innobase_fts_check_doc_id_index_in_def(
 		if (!(key->flags & HA_NOSAME)
 		    || key->user_defined_key_parts != 1
 		    || strcmp(key->name, FTS_DOC_ID_INDEX_NAME)
-		    || strcmp(key->key_part[0].field->field_name,
+		    || strcmp(key->key_part[0].field->field_name.str,
 			      FTS_DOC_ID_COL_NAME)) {
 			return(FTS_INCORRECT_DOC_ID_INDEX);
 		}
@@ -2307,10 +2307,10 @@ online_retry_drop_indexes_with_trx(
 @param drop_fk		constraints being dropped
 @param n_drop_fk	number of constraints that are being dropped
 @return whether the constraint is being dropped */
-inline MY_ATTRIBUTE((pure, nonnull, warn_unused_result))
+MY_ATTRIBUTE((pure, nonnull(1), warn_unused_result))
+inline
 bool
 innobase_dropping_foreign(
-/*======================*/
 	const dict_foreign_t*	foreign,
 	dict_foreign_t**	drop_fk,
 	ulint			n_drop_fk)
@@ -2334,10 +2334,10 @@ column that is being dropped or modified to NOT NULL.
 @retval true		Not allowed (will call my_error())
 @retval false		Allowed
 */
-static MY_ATTRIBUTE((pure, nonnull, warn_unused_result))
+MY_ATTRIBUTE((pure, nonnull(1,4), warn_unused_result))
+static
 bool
 innobase_check_foreigns_low(
-/*========================*/
 	const dict_table_t*	user_table,
 	dict_foreign_t**	drop_fk,
 	ulint			n_drop_fk,
@@ -2434,10 +2434,10 @@ column that is being dropped or modified to NOT NULL.
 @retval true		Not allowed (will call my_error())
 @retval false		Allowed
 */
-static MY_ATTRIBUTE((pure, nonnull, warn_unused_result))
+MY_ATTRIBUTE((pure, nonnull(1,2,3,4), warn_unused_result))
+static
 bool
 innobase_check_foreigns(
-/*====================*/
 	Alter_inplace_info*	ha_alter_info,
 	const TABLE*		altered_table,
 	const TABLE*		old_table,
@@ -2464,7 +2464,7 @@ innobase_check_foreigns(
 		if (!new_field || (new_field->flags & NOT_NULL_FLAG)) {
 			if (innobase_check_foreigns_low(
 				    user_table, drop_fk, n_drop_fk,
-				    (*fp)->field_name, !new_field)) {
+				    (*fp)->field_name.str, !new_field)) {
 				return(true);
 			}
 		}
@@ -2693,7 +2693,7 @@ innobase_get_col_names(
 
 		for (uint old_i = 0; table->field[old_i]; old_i++) {
 			if (new_field->field == table->field[old_i]) {
-				cols[old_i] = new_field->field_name;
+				cols[old_i] = new_field->field_name.str;
 				break;
 			}
 		}
@@ -2980,7 +2980,7 @@ prepare_inplace_alter_table_dict(
 					dict_mem_table_free(
 						ctx->new_table);
 					my_error(ER_WRONG_KEY_COLUMN, MYF(0),
-						 field->field_name);
+						 field->field_name.str);
 					goto new_clustered_failed;
 				}
 			} else {
@@ -3007,16 +3007,16 @@ prepare_inplace_alter_table_dict(
 				}
 			}
 
-			if (dict_col_name_is_reserved(field->field_name)) {
+			if (dict_col_name_is_reserved(field->field_name.str)) {
 				dict_mem_table_free(ctx->new_table);
 				my_error(ER_WRONG_COLUMN_NAME, MYF(0),
-					 field->field_name);
+					 field->field_name.str);
 				goto new_clustered_failed;
 			}
 
 			dict_mem_table_add_col(
 				ctx->new_table, ctx->heap,
-				field->field_name,
+				field->field_name.str,
 				col_type,
 				dtype_form_prtype(field_type, charset_no),
 				col_len);
@@ -3137,7 +3137,7 @@ prepare_inplace_alter_table_dict(
 		clustered index of the old table, later. */
 		if (new_clustered
 		    || !ctx->online
-		    || user_table->ibd_file_missing
+		    || !user_table->is_readable()
 		    || dict_table_is_discarded(user_table)) {
 			/* No need to allocate a modification log. */
 			ut_ad(!ctx->add_index[a]->online_log);
@@ -3557,6 +3557,43 @@ ha_innobase::prepare_inplace_alter_table(
 		goto func_exit;
 	}
 
+	indexed_table = prebuilt->table;
+
+	if (indexed_table->is_readable()) {
+	} else {
+		if (indexed_table->corrupted) {
+			/* Handled below */
+		} else {
+			FilSpace space(indexed_table->space, true);
+
+			if (space()) {
+				String str;
+				const char* engine= table_type();
+				char	buf[MAX_FULL_NAME_LEN];
+				ut_format_name(indexed_table->name, TRUE, buf, sizeof(buf));
+
+				push_warning_printf(user_thd, Sql_condition::WARN_LEVEL_WARN,
+					HA_ERR_DECRYPTION_FAILED,
+					"Table %s in file %s is encrypted but encryption service or"
+					" used key_id is not available. "
+					" Can't continue reading table.",
+					buf, space()->chain.start->name);
+
+				my_error(ER_GET_ERRMSG, MYF(0), HA_ERR_DECRYPTION_FAILED, str.c_ptr(), engine);
+				DBUG_RETURN(true);
+			}
+		}
+	}
+
+	if (indexed_table->corrupted
+	    || dict_table_get_first_index(indexed_table) == NULL
+	    || dict_index_is_corrupted(
+		    dict_table_get_first_index(indexed_table))) {
+		/* The clustered index is corrupted. */
+		my_error(ER_CHECK_NO_SUCH_TABLE, MYF(0));
+		DBUG_RETURN(true);
+	}
+
 	if (ha_alter_info->handler_flags
 	    & Alter_inplace_info::CHANGE_CREATE_OPTION) {
 		/* Check engine specific table options */
@@ -3619,7 +3656,7 @@ err_exit_no_heap:
 			cf_it.rewind();
 			while (Create_field* cf = cf_it++) {
 				if (cf->field == *fp) {
-					name = cf->field_name;
+					name = cf->field_name.str;
 					goto check_if_ok_to_rename;
 				}
 			}
@@ -3629,7 +3666,7 @@ check_if_ok_to_rename:
 			/* Prohibit renaming a column from FTS_DOC_ID
 			if full-text indexes exist. */
 			if (!my_strcasecmp(system_charset_info,
-					   (*fp)->field_name,
+					   (*fp)->field_name.str,
 					   FTS_DOC_ID_COL_NAME)
 			    && innobase_fulltext_exist(altered_table)) {
 				my_error(ER_INNODB_FT_WRONG_DOCID_COLUMN,
@@ -4209,7 +4246,7 @@ ok_exit:
 	DBUG_ASSERT(ctx->trx);
 	DBUG_ASSERT(ctx->prebuilt == prebuilt);
 
-	if (prebuilt->table->ibd_file_missing
+	if (prebuilt->table->file_unreadable
 	    || dict_table_is_discarded(prebuilt->table)) {
 		goto all_done;
 	}
@@ -4806,8 +4843,8 @@ innobase_rename_columns_try(
 			if (cf->field == *fp) {
 				if (innobase_rename_column_try(
 					    ctx->old_table, trx, table_name, i,
-					    cf->field->field_name,
-					    cf->field_name,
+					    cf->field->field_name.str,
+					    cf->field_name.str,
 					    ctx->need_rebuild())) {
 					return(true);
 				}
@@ -4854,8 +4891,8 @@ innobase_rename_columns_cache(
 		while (Create_field* cf = cf_it++) {
 			if (cf->field == *fp) {
 				dict_mem_table_col_rename(user_table, i,
-							  cf->field->field_name,
-							  cf->field_name);
+							  cf->field->field_name.str,
+							  cf->field_name.str);
 				goto processed_field;
 			}
 		}
@@ -4917,7 +4954,7 @@ commit_get_autoinc(
 		dict_table_autoinc_lock(ctx->old_table);
 
 		err = row_search_max_autoinc(
-			index, autoinc_field->field_name, &max_value_table);
+			index, autoinc_field->field_name.str, &max_value_table);
 
 		if (err != DB_SUCCESS) {
 			ut_ad(0);
@@ -5231,7 +5268,7 @@ commit_try_rebuild(
 	/* The new table must inherit the flag from the
 	"parent" table. */
 	if (dict_table_is_discarded(user_table)) {
-		rebuilt_table->ibd_file_missing = true;
+		rebuilt_table->file_unreadable = true;
 		rebuilt_table->flags2 |= DICT_TF2_DISCARDED;
 	}
 
@@ -5763,9 +5800,9 @@ ha_innobase::commit_inplace_alter_table(
 	if (ha_alter_info->group_commit_ctx) {
 		ctx_array = ha_alter_info->group_commit_ctx;
 	} else {
-	ctx_single[0] = ctx0;
-	ctx_single[1] = NULL;
-	ctx_array = ctx_single;
+		ctx_single[0] = ctx0;
+		ctx_single[1] = NULL;
+		ctx_array = ctx_single;
 	}
 
 	DBUG_ASSERT(ctx0 == ctx_array[0]);
@@ -5793,6 +5830,19 @@ ha_innobase::commit_inplace_alter_table(
 		ha_innobase_inplace_ctx*	ctx
 			= static_cast<ha_innobase_inplace_ctx*>(*pctx);
 		DBUG_ASSERT(ctx->prebuilt->trx == prebuilt->trx);
+
+		/* If decryption failed for old table or new table
+		fail here. */
+		if ((ctx->old_table->file_unreadable &&
+		     fil_space_get(ctx->old_table->space) != NULL)||
+		    (ctx->new_table->file_unreadable &&
+		     fil_space_get(ctx->new_table->space) != NULL)) {
+			String str;
+			const char* engine= table_type();
+			get_error_message(HA_ERR_DECRYPTION_FAILED, &str);
+			my_error(ER_GET_ERRMSG, MYF(0), HA_ERR_DECRYPTION_FAILED, str.c_ptr(), engine);
+			DBUG_RETURN(true);
+		}
 
 		/* Exclusively lock the table, to ensure that no other
 		transaction is holding locks on the table while we

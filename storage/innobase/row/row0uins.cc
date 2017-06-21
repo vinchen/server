@@ -1,6 +1,6 @@
 /*****************************************************************************
 
-Copyright (c) 1997, 2016, Oracle and/or its affiliates. All Rights Reserved.
+Copyright (c) 1997, 2017, Oracle and/or its affiliates. All Rights Reserved.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -25,6 +25,7 @@ Created 2/25/1997 Heikki Tuuri
 
 #include "row0uins.h"
 #include "dict0dict.h"
+#include "dict0stats.h"
 #include "dict0boot.h"
 #include "dict0crea.h"
 #include "trx0undo.h"
@@ -41,6 +42,7 @@ Created 2/25/1997 Heikki Tuuri
 #include "que0que.h"
 #include "ibuf0ibuf.h"
 #include "log0log.h"
+#include "fil0fil.h"
 
 /*************************************************************************
 IMPORTANT NOTE: Any operation that generates redo MUST check that there
@@ -345,8 +347,20 @@ row_undo_ins_parse_undo_rec(
 
 	/* Skip the UNDO if we can't find the table or the .ibd file. */
 	if (UNIV_UNLIKELY(node->table == NULL)) {
-	} else if (UNIV_UNLIKELY(node->table->ibd_file_missing)) {
+		return;
+	}
+
+	if (UNIV_UNLIKELY(!fil_table_accessible(node->table))) {
 close_table:
+		/* Normally, tables should not disappear or become
+		unaccessible during ROLLBACK, because they should be
+		protected by InnoDB table locks. TRUNCATE TABLE
+		or table corruption could be valid exceptions.
+
+		FIXME: When running out of temporary tablespace, it
+		would probably be better to just drop all temporary
+		tables (and temporary undo log records) of the current
+		connection, instead of doing this rollback. */
 		dict_table_close(node->table, dict_locked, FALSE);
 		node->table = NULL;
 	} else {
@@ -357,6 +371,9 @@ close_table:
 				ptr, clust_index, &node->ref, node->heap);
 
 			if (!row_undo_search_clust_to_pcur(node)) {
+				/* An error probably occurred during
+				an insert into the clustered index,
+				after we wrote the undo log record. */
 				goto close_table;
 			}
 			if (node->table->n_v_cols) {
@@ -491,6 +508,23 @@ row_undo_ins(
 		    && !dict_locked) {
 
 			mutex_exit(&dict_sys->mutex);
+		}
+
+		if (err == DB_SUCCESS && node->table->stat_initialized) {
+			/* Not protected by dict_table_stats_lock() for
+			performance reasons, we would rather get garbage
+			in stat_n_rows (which is just an estimate anyway)
+			than protecting the following code with a latch. */
+			dict_table_n_rows_dec(node->table);
+
+			/* Do not attempt to update statistics when
+			executing ROLLBACK in the InnoDB SQL
+			interpreter, because in that case we would
+			already be holding dict_sys->mutex, which
+			would be acquired when updating statistics. */
+			if (!dict_locked) {
+				dict_stats_update_if_needed(node->table);
+			}
 		}
 	}
 

@@ -12,7 +12,8 @@ enum enum_server_command
   COM_UNIMPLEMENTED,
   COM_RESET_CONNECTION,
   COM_MDB_GAP_BEG,
-  COM_MDB_GAP_END=250,
+  COM_MDB_GAP_END=249,
+  COM_STMT_BULK_EXECUTE=250,
   COM_SLAVE_WORKER=251,
   COM_SLAVE_IO=252,
   COM_SLAVE_SQL=253,
@@ -136,7 +137,7 @@ typedef struct st_udf_args
   char **args;
   unsigned long *lengths;
   char *maybe_null;
-  char **attributes;
+  const char **attributes;
   unsigned long *attribute_lengths;
   void *extension;
 } UDF_ARGS;

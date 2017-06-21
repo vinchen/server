@@ -3211,7 +3211,7 @@ drop procedure bug10961|
 DROP PROCEDURE IF EXISTS bug6866|
 DROP VIEW IF EXISTS tv|
 Warnings:
-Note	4067	Unknown VIEW: 'test.tv'
+Note	4068	Unknown VIEW: 'test.tv'
 DROP TABLE IF EXISTS tt1,tt2,tt3|
 Warnings:
 Note	1051	Unknown table 'test.tt1'
@@ -4329,57 +4329,57 @@ Table	Op	Msg_type	Msg_text
 test.t1	repair	status	OK
 test.t2	repair	status	OK
 test.t3	repair	status	OK
-test.v1	repair	Error	'test.v1' is not BASE TABLE
+test.v1	repair	Error	'test.v1' is not of type 'BASE TABLE'
 test.v1	repair	status	Operation failed
 Table	Op	Msg_type	Msg_text
 test.t1	optimize	status	OK
 test.t2	optimize	status	OK
 test.t3	optimize	status	OK
-test.v1	optimize	Error	'test.v1' is not BASE TABLE
+test.v1	optimize	Error	'test.v1' is not of type 'BASE TABLE'
 test.v1	optimize	status	Operation failed
 Table	Op	Msg_type	Msg_text
 test.t1	analyze	status	Table is already up to date
 test.t2	analyze	status	Table is already up to date
 test.t3	analyze	status	Table is already up to date
-test.v1	analyze	Error	'test.v1' is not BASE TABLE
+test.v1	analyze	Error	'test.v1' is not of type 'BASE TABLE'
 test.v1	analyze	status	Operation failed
 call bug13012()|
 Table	Op	Msg_type	Msg_text
 test.t1	repair	status	OK
 test.t2	repair	status	OK
 test.t3	repair	status	OK
-test.v1	repair	Error	'test.v1' is not BASE TABLE
+test.v1	repair	Error	'test.v1' is not of type 'BASE TABLE'
 test.v1	repair	status	Operation failed
 Table	Op	Msg_type	Msg_text
 test.t1	optimize	status	OK
 test.t2	optimize	status	OK
 test.t3	optimize	status	OK
-test.v1	optimize	Error	'test.v1' is not BASE TABLE
+test.v1	optimize	Error	'test.v1' is not of type 'BASE TABLE'
 test.v1	optimize	status	Operation failed
 Table	Op	Msg_type	Msg_text
 test.t1	analyze	status	Table is already up to date
 test.t2	analyze	status	Table is already up to date
 test.t3	analyze	status	Table is already up to date
-test.v1	analyze	Error	'test.v1' is not BASE TABLE
+test.v1	analyze	Error	'test.v1' is not of type 'BASE TABLE'
 test.v1	analyze	status	Operation failed
 call bug13012()|
 Table	Op	Msg_type	Msg_text
 test.t1	repair	status	OK
 test.t2	repair	status	OK
 test.t3	repair	status	OK
-test.v1	repair	Error	'test.v1' is not BASE TABLE
+test.v1	repair	Error	'test.v1' is not of type 'BASE TABLE'
 test.v1	repair	status	Operation failed
 Table	Op	Msg_type	Msg_text
 test.t1	optimize	status	OK
 test.t2	optimize	status	OK
 test.t3	optimize	status	OK
-test.v1	optimize	Error	'test.v1' is not BASE TABLE
+test.v1	optimize	Error	'test.v1' is not of type 'BASE TABLE'
 test.v1	optimize	status	Operation failed
 Table	Op	Msg_type	Msg_text
 test.t1	analyze	status	Table is already up to date
 test.t2	analyze	status	Table is already up to date
 test.t3	analyze	status	Table is already up to date
-test.v1	analyze	Error	'test.v1' is not BASE TABLE
+test.v1	analyze	Error	'test.v1' is not of type 'BASE TABLE'
 test.v1	analyze	status	Operation failed
 drop procedure bug13012|
 drop view v1|
@@ -6469,7 +6469,7 @@ CALL p2(10);
 SHOW CREATE TABLE t1;
 Table	Create Table
 t1	CREATE TABLE `t1` (
-  `v` bigint(11) DEFAULT NULL
+  `v` int(11) DEFAULT NULL
 ) ENGINE=MyISAM DEFAULT CHARSET=latin1
 
 DROP TABLE t1;
@@ -6480,7 +6480,7 @@ Warning	1366	Incorrect integer value: 'text' for column 'v' at row 1
 SHOW CREATE TABLE t1;
 Table	Create Table
 t1	CREATE TABLE `t1` (
-  `v` bigint(11) DEFAULT NULL
+  `v` int(11) DEFAULT NULL
 ) ENGINE=MyISAM DEFAULT CHARSET=latin1
 
 DROP TABLE t1;
@@ -7823,6 +7823,7 @@ ERROR 23000: Duplicate entry '2' for key 'PRIMARY'
 show warnings;
 Level	Code	Message
 Error	1062	Duplicate entry '2' for key 'PRIMARY'
+Note	4070	At line 5 in test.p1
 select * from t1;
 id
 1

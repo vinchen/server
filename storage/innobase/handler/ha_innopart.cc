@@ -1,6 +1,6 @@
 /*****************************************************************************
 
-Copyright (c) 2014, 2016, Oracle and/or its affiliates. All rights reserved.
+Copyright (c) 2014, 2017, Oracle and/or its affiliates. All rights reserved.
 Copyright (c) 2016, 2017, MariaDB Corporation.
 
 This program is free software; you can redistribute it and/or modify it under
@@ -68,8 +68,6 @@ static const char* sub_sep = "#SP#";
 /* Partition separator for *nix platforms */
 const char* part_sep_nix = "#P#";
 const char* sub_sep_nix = "#SP#";
-
-extern char*	innobase_file_format_max;
 
 Ha_innopart_share::Ha_innopart_share(
 	TABLE_SHARE*	table_share)
@@ -932,7 +930,6 @@ ha_innopart::open(
 {
 	dict_table_t*	ib_table;
 	char		norm_name[FN_REFLEN];
-	THD*		thd;
 
 	DBUG_ENTER("ha_innopart::open");
 
@@ -942,15 +939,10 @@ ha_innopart::open(
 		ut_ad(table->part_info != NULL);
 		m_part_info = table->part_info;
 	}
-	thd = ha_thd();
 
 	/* Under some cases MySQL seems to call this function while
 	holding search latch(es). This breaks the latching order as
 	we acquire dict_sys->mutex below and leads to a deadlock. */
-
-	if (thd != NULL) {
-		innobase_release_temporary_latches(ht, thd);
-	}
 
 	normalize_table_name(norm_name, name);
 
@@ -1017,6 +1009,7 @@ share_error:
 	MONITOR_INC(MONITOR_TABLE_OPEN);
 
 	bool	no_tablespace;
+	THD*	thd = ha_thd();
 
 	/* TODO: Should we do this check for every partition during ::open()? */
 	/* TODO: refactor this in ha_innobase so it can increase code reuse. */
@@ -1207,15 +1200,6 @@ share_error:
 	/* Index block size in InnoDB: used by MySQL in query optimization. */
 	stats.block_size = UNIV_PAGE_SIZE;
 
-	if (m_prebuilt->table != NULL) {
-		/* We update the highest file format in the system table
-		space, if this table has higher file format setting. */
-
-		trx_sys_file_format_max_upgrade(
-			(const char**) &innobase_file_format_max,
-			dict_table_get_format(m_prebuilt->table));
-	}
-
 	/* Only if the table has an AUTOINC column. */
 	if (m_prebuilt->table != NULL
 	    && !m_prebuilt->table->ibd_file_missing
@@ -1372,14 +1356,7 @@ void ha_innopart::clear_ins_upd_nodes()
 int
 ha_innopart::close()
 {
-	THD*	thd;
-
 	DBUG_ENTER("ha_innopart::close");
-
-	thd = ha_thd();
-	if (thd != NULL) {
-		innobase_release_temporary_latches(ht, thd);
-	}
 
 	ut_ad(m_pcur_parts == NULL);
 	ut_ad(m_clust_pcur_parts == NULL);
@@ -3004,41 +2981,6 @@ ha_innopart::truncate()
 	DBUG_RETURN(error);
 }
 
-/** Total number of rows in all used partitions.
-Returns the exact number of records that this client can see using this
-handler object.
-@param[out]	num_rows	Number of rows.
-@return	0 or error number. */
-int
-ha_innopart::records(
-	ha_rows*	num_rows)
-{
-	ha_rows	n_rows;
-	int	err;
-	DBUG_ENTER("ha_innopart::records()");
-
-	*num_rows = 0;
-
-	/* The index scan is probably so expensive, so the overhead
-	of the rest of the function is neglectable for each partition.
-	So no current reason for optimizing this further. */
-
-	for (uint i = m_part_info->get_first_used_partition();
-	     i < m_tot_parts;
-	     i = m_part_info->get_next_used_partition(i)) {
-
-		set_partition(i);
-		err = ha_innobase::records(&n_rows);
-		update_partition(i);
-		if (err != 0) {
-			*num_rows = HA_POS_ERROR;
-			DBUG_RETURN(err);
-		}
-		*num_rows += n_rows;
-	}
-	DBUG_RETURN(0);
-}
-
 /** Estimates the number of index records in a range.
 @param[in]	keynr	Index number.
 @param[in]	min_key	Start key value (or NULL).
@@ -3066,11 +3008,6 @@ ha_innopart::records_in_range(
 	ut_a(m_prebuilt->trx == thd_to_trx(ha_thd()));
 
 	m_prebuilt->trx->op_info = (char*)"estimating records in index range";
-
-	/* In case MySQL calls this in the middle of a SELECT query, release
-	possible adaptive hash latch to avoid deadlocks of threads. */
-
-	trx_assert_no_search_latch(m_prebuilt->trx);
 
 	active_index = keynr;
 
@@ -3206,11 +3143,6 @@ ha_innopart::estimate_rows_upper_bound()
 
 	m_prebuilt->trx->op_info = "calculating upper bound for table rows";
 
-	/* In case MySQL calls this in the middle of a SELECT query, release
-	possible adaptive hash latch to avoid deadlocks of threads. */
-
-	trx_assert_no_search_latch(m_prebuilt->trx);
-
 	for (uint i = m_part_info->get_first_used_partition();
 	     i < m_tot_parts;
 	     i = m_part_info->get_next_used_partition(i)) {
@@ -3322,12 +3254,7 @@ ha_innopart::info_low(
 
 	update_thd(ha_thd());
 
-	/* In case MySQL calls this in the middle of a SELECT query, release
-	possible adaptive hash latch to avoid deadlocks of threads. */
-
-	m_prebuilt->trx->op_info = (char*)"returning various info to MySQL";
-
-	trx_assert_no_search_latch(m_prebuilt->trx);
+	m_prebuilt->trx->op_info = "returning various info to MySQL";
 
 	ut_ad(m_part_share->get_table_part(0)->n_ref_count > 0);
 
