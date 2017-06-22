@@ -4230,9 +4230,9 @@ innobase_add_one_instant(
 
 	/* First check whether the column to be added has a
 	system reserved name. */
-	if (dict_col_name_is_reserved(field->field_name)){
+	if (dict_col_name_is_reserved(field->field_name.str)){
 		my_error(ER_WRONG_COLUMN_NAME, MYF(0),
-			field->field_name);
+			field->field_name.str);
 
 		error = DB_ERROR;
 		goto err_exit;
@@ -4285,7 +4285,7 @@ innobase_add_one_instant(
 
 	pars_info_add_ull_literal(info, "id", table->id);
 	pars_info_add_int4_literal(info, "pos", pos_in_innodb);
-	pars_info_add_str_literal(info, "name", field->field_name);
+	pars_info_add_str_literal(info, "name", field->field_name.str);
 	pars_info_add_int4_literal(info, "mtype", col_type);
 	pars_info_add_int4_literal(info, "prtype", prtype);
 	pars_info_add_int4_literal(info, "len", col_len);
