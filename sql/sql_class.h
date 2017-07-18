@@ -885,7 +885,16 @@ inline bool is_supported_parser_charset(CHARSET_INFO *cs)
   return MY_TEST(cs->mbminlen == 1);
 }
 
-sql_mode_t sql_mode_for_dates(THD *thd);
+/**
+  Get the sql_mode for dates from THD
+  @param thd      THD
+  @retval         MODE_*_DATE from THD
+*/
+inline sql_mode_t sql_mode_for_dates(THD *thd)
+{
+  return thd->variables.sql_mode &
+          (MODE_NO_ZERO_DATE | MODE_NO_ZERO_IN_DATE | MODE_INVALID_DATES);
+}
 
 #ifdef MYSQL_SERVER
 
