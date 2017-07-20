@@ -890,11 +890,7 @@ inline bool is_supported_parser_charset(CHARSET_INFO *cs)
   @param thd      THD
   @retval         MODE_*_DATE from THD
 */
-inline sql_mode_t sql_mode_for_dates(THD *thd)
-{
-  return thd->variables.sql_mode &
-          (MODE_NO_ZERO_DATE | MODE_NO_ZERO_IN_DATE | MODE_INVALID_DATES);
-}
+sql_mode_t sql_mode_for_dates(THD *thd);
 
 #ifdef MYSQL_SERVER
 

@@ -1003,10 +1003,7 @@ struct dict_index_t{
 	/** @return whether the index is the clustered index of instant table.
 	@retval true if clustered index of instant table
 	@retval false otherwise */
-	bool is_instant() const
-	{
-		return dict_index_is_clust(this) && table->is_instant();
-	}
+	inline bool is_instant() const;
 };
 
 /** The status of online index creation */

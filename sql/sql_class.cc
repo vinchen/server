@@ -6233,6 +6233,17 @@ int THD::decide_logging_format(TABLE_LIST *tables)
   inserted/updated/deleted.
 */
 
+/**
+  Get the sql_mode for dates from THD
+  @param thd      THD
+  @retval         MODE_*_DATE from THD
+*/
+sql_mode_t sql_mode_for_dates(THD *thd)
+{
+  return thd->variables.sql_mode &
+          (MODE_NO_ZERO_DATE | MODE_NO_ZERO_IN_DATE | MODE_INVALID_DATES);
+}
+
 #ifndef MYSQL_CLIENT
 
 /*

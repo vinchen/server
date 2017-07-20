@@ -321,6 +321,16 @@ dict_table_get_next_index(
 }
 #endif /* UNIV_DEBUG */
 
+/** @return whether the index is the clustered index of instant table.
+@retval true if clustered index of instant table
+@retval false otherwise */
+inline 
+bool 
+dict_index_t::is_instant() const
+{
+	return dict_index_is_clust(this) && table->is_instant();
+}
+
 /********************************************************************//**
 Check whether the index is the clustered index.
 @return nonzero for clustered index, zero for other indexes */

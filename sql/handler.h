@@ -1917,11 +1917,6 @@ public:
   static const HA_ALTER_FLAGS ADD_STORED_BASE_COLUMN     = 1ULL << 7;
   // Stored generated column
   static const HA_ALTER_FLAGS ADD_STORED_GENERATED_COLUMN= 1ULL << 8;
-  // Add generic column (convience constant).
-  static const HA_ALTER_FLAGS ADD_COLUMN= ADD_VIRTUAL_COLUMN |
-                                          ADD_STORED_BASE_COLUMN |
-                                          ADD_STORED_GENERATED_COLUMN |
-                                          ADD_INSTANT_COLUMN;
 
   // Drop column
   static const HA_ALTER_FLAGS DROP_VIRTUAL_COLUMN        = 1ULL << 9;
@@ -2033,7 +2028,12 @@ public:
 
   // Instant generated column
   static const HA_ALTER_FLAGS ADD_INSTANT_COLUMN         = 1ULL << 41;
-  
+   // Add generic column (convience constant).
+  static const HA_ALTER_FLAGS ADD_COLUMN= ADD_VIRTUAL_COLUMN |
+                                          ADD_STORED_BASE_COLUMN |
+                                          ADD_STORED_GENERATED_COLUMN |
+                                          ADD_INSTANT_COLUMN;
+ 
   /**
     Create options (like MAX_ROWS) for the new version of table.
 
