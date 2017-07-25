@@ -274,7 +274,7 @@ void
 dict_mem_table_fake_nth_col_default(
 /*==============*/
 	dict_table_t*	table,	/*!< in/out: table, set the default values 
-												for the nth columns */
+							for the nth columns */
 	ulint					pos,	/*!< in: the position of column in table */
 	mem_heap_t*		heap	/*!< in: mem_heap for default value */
 )

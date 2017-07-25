@@ -669,21 +669,6 @@ dict_table_is_comp(
 	return(table->flags & DICT_TF_COMPACT);
 }
 
-/********************************************************************//**
-Check whether the table use compressed row format.
-@return TRUE if table use compressed row format */
-UNIV_INLINE
-ibool
-dict_table_is_zip(
-/*===============*/
-	const dict_table_t*	table)	/*!< in: table */
-{
-	ut_ad(table);
-
-	return (dict_table_is_comp(table) && DICT_TF_GET_ZIP_SSIZE(table->flags)) ||
-		!strcmp(table->name.m_name, "ZIP_DUMMY");
-}
-
 /************************************************************************
 Check if the table has an FTS index. */
 UNIV_INLINE
@@ -1373,11 +1358,8 @@ dict_index_get_nth_col_def_with_heap(
 	byte* def_val;
 
 	col = dict_index_get_nth_col(index, pos);
-
 	ut_ad(col->def_val);
-
 	*len = col->def_val->def_val_len;
-	
 	def_val = col->def_val->def_val;	
 	
 	if (heap && def_val) {
